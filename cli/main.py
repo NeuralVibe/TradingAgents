@@ -504,23 +504,23 @@ def get_user_selections():
     # Step 1: Ticker symbol
     console.print(
         create_question_box(
-            "Step 1: Ticker Symbol",
-            "Enter the exact ticker symbol to analyze, including exchange suffix when needed (examples: SPY, CNC.TO, 7203.T, 0700.HK)",
+            "1단계: 티커 심볼 입력 (Step 1: Ticker Symbol)",
+            "분석할 정확한 티커 심볼을 입력해 주세요. 거래소 접미사가 필요한 경우 포함해 주십시오 (예: SPY, CNC.TO, 7203.T, 0700.HK)",
             "SPY",
         )
     )
     selected_ticker = get_ticker()
     asset_type = detect_asset_type(selected_ticker)
     console.print(
-        f"[green]Detected asset type:[/green] {asset_type.value}"
+        f"[green]감지된 자산 유형 (Detected asset type):[/green] {asset_type.value}"
     )
 
     # Step 2: Analysis date
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")
     console.print(
         create_question_box(
-            "Step 2: Analysis Date",
-            "Enter the analysis date (YYYY-MM-DD)",
+            "2단계: 분석 날짜 설정 (Step 2: Analysis Date)",
+            "분석 기준 날짜를 입력해 주세요 (YYYY-MM-DD 형식)",
             default_date,
         )
     )
@@ -529,8 +529,8 @@ def get_user_selections():
     # Step 3: Output language
     console.print(
         create_question_box(
-            "Step 3: Output Language",
-            "Select the language for analyst reports and final decision"
+            "3단계: 출력 언어 설정 (Step 3: Output Language)",
+            "최종 애널리스트 보고서 및 포트폴리오 결정에 사용할 언어를 선택해 주세요"
         )
     )
     output_language = ask_output_language()
@@ -538,18 +538,18 @@ def get_user_selections():
     # Step 4: Select analysts
     console.print(
         create_question_box(
-            "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
+            "4단계: 애널리스트 팀 구성 (Step 4: Analysts Team)", "주식 분석을 담당할 LLM 애널리스트 에이전트를 선택해 주세요"
         )
     )
     selected_analysts = select_analysts(asset_type)
     console.print(
-        f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
+        f"[green]선택된 애널리스트 (Selected analysts):[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
     )
 
     # Step 5: Research depth
     console.print(
         create_question_box(
-            "Step 5: Research Depth", "Select your research depth level"
+            "5단계: 연구 깊이 설정 (Step 5: Research Depth)", "시뮬레이션의 리서치 깊이 및 토론 단계 수준을 설정해 주세요"
         )
     )
     selected_research_depth = select_research_depth()
@@ -557,7 +557,7 @@ def get_user_selections():
     # Step 6: LLM Provider
     console.print(
         create_question_box(
-            "Step 6: LLM Provider", "Select your LLM provider"
+            "6단계: LLM 공급자 선택 (Step 6: LLM Provider)", "연동하여 사용할 LLM 서비스 공급자를 선택해 주세요"
         )
     )
     selected_llm_provider, backend_url = select_llm_provider()
@@ -585,7 +585,7 @@ def get_user_selections():
     # Step 7: Thinking agents
     console.print(
         create_question_box(
-            "Step 7: Thinking Agents", "Select your thinking agents for analysis"
+            "7단계: 추론 모델 엔진 설정 (Step 7: Thinking Agents)", "분석 및 종합 의사결정에 사용할 LLM 추론 엔진을 설정해 주세요"
         )
     )
     selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
@@ -600,24 +600,24 @@ def get_user_selections():
     if provider_lower == "google":
         console.print(
             create_question_box(
-                "Step 8: Thinking Mode",
-                "Configure Gemini thinking mode"
+                "8단계: 추론 모드 설정 (Step 8: Thinking Mode)",
+                "Gemini 모델의 추론(Thinking) 설정을 진행합니다"
             )
         )
         thinking_level = ask_gemini_thinking_config()
     elif provider_lower == "openai":
         console.print(
             create_question_box(
-                "Step 8: Reasoning Effort",
-                "Configure OpenAI reasoning effort level"
+                "8단계: 추론 노력 수준 (Step 8: Reasoning Effort)",
+                "OpenAI 모델의 추론 노력 수준(Reasoning Effort)을 설정합니다"
             )
         )
         reasoning_effort = ask_openai_reasoning_effort()
     elif provider_lower == "anthropic":
         console.print(
             create_question_box(
-                "Step 8: Effort Level",
-                "Configure Claude effort level"
+                "8단계: 추론 노력 수준 (Step 8: Effort Level)",
+                "Claude 모델의 추론 노력 수준(Effort Level)을 설정합니다"
             )
         )
         anthropic_effort = ask_anthropic_effort()

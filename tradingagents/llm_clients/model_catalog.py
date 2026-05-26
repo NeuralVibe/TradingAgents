@@ -175,6 +175,16 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Custom model ID", "custom"),
         ],
     },
+    "local": {
+        "quick": [
+            ("qwen3.6-27b-uncensored-heretic-v2-native-mtp-preserved", "qwen3.6-27b-uncensored-heretic-v2-native-mtp-preserved"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("qwen3.6-27b-uncensored-heretic-v2-native-mtp-preserved", "qwen3.6-27b-uncensored-heretic-v2-native-mtp-preserved"),
+            ("Custom model ID", "custom"),
+        ],
+    },
 }
 
 

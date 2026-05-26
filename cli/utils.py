@@ -27,8 +27,8 @@ CRYPTO_SUFFIXES = ("-USD", "-USDT", "-USDC", "-BTC", "-ETH")
 def get_ticker() -> str:
     """Prompt the user to enter a ticker symbol."""
     ticker = questionary.text(
-        f"Enter the exact ticker symbol to analyze ({TICKER_INPUT_EXAMPLES}):",
-        validate=lambda x: len(x.strip()) > 0 or "Please enter a valid ticker symbol.",
+        f"분석할 주식 티커 심볼을 정확히 입력해 주세요 ({TICKER_INPUT_EXAMPLES}):",
+        validate=lambda x: len(x.strip()) > 0 or "유효한 티커 심볼을 입력해 주세요.",
         style=questionary.Style(
             [
                 ("text", "fg:green"),
@@ -38,7 +38,7 @@ def get_ticker() -> str:
     ).ask()
 
     if not ticker:
-        console.print("\n[red]No ticker symbol provided. Exiting...[/red]")
+        console.print("\n[red]티커 심볼이 제공되지 않았습니다. 종료합니다...[/red]")
         exit(1)
 
     return normalize_ticker_symbol(ticker)
@@ -83,9 +83,9 @@ def get_analysis_date() -> str:
             return False
 
     date = questionary.text(
-        "Enter the analysis date (YYYY-MM-DD):",
+        "분석 기준 날짜를 입력해 주세요 (YYYY-MM-DD):",
         validate=lambda x: validate_date(x.strip())
-        or "Please enter a valid date in YYYY-MM-DD format.",
+        or "YYYY-MM-DD 형식에 맞는 유효한 날짜를 입력해 주세요.",
         style=questionary.Style(
             [
                 ("text", "fg:green"),
@@ -95,7 +95,7 @@ def get_analysis_date() -> str:
     ).ask()
 
     if not date:
-        console.print("\n[red]No date provided. Exiting...[/red]")
+        console.print("\n[red]날짜가 입력되지 않았습니다. 종료합니다...[/red]")
         exit(1)
 
     return date.strip()
@@ -108,14 +108,14 @@ def select_analysts(asset_type: AssetType = AssetType.STOCK) -> List[AnalystType
         asset_type,
     )
     choices = questionary.checkbox(
-        "Select Your [Analysts Team]:",
+        "분석에 참여할 [애널리스트 팀]을 선택해 주세요 (Select Your [Analysts Team]):",
         choices=[
             questionary.Choice(display, value=value)
             for display, value in ANALYST_ORDER
             if value in available_analysts
         ],
-        instruction="\n- Press Space to select/unselect analysts\n- Press 'a' to select/unselect all\n- Press Enter when done",
-        validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
+        instruction="\n- [Space] 키: 선택/해제\n- [a] 키: 전체 선택/해제\n- [Enter] 키: 선택 완료",
+        validate=lambda x: len(x) > 0 or "최소 한 명 이상의 애널리스트를 선택해야 합니다.",
         style=questionary.Style(
             [
                 ("checkbox-selected", "fg:green"),
@@ -127,7 +127,7 @@ def select_analysts(asset_type: AssetType = AssetType.STOCK) -> List[AnalystType
     ).ask()
 
     if not choices:
-        console.print("\n[red]No analysts selected. Exiting...[/red]")
+        console.print("\n[red]선택된 애널리스트가 없습니다. 종료합니다...[/red]")
         exit(1)
 
     return choices
@@ -138,17 +138,17 @@ def select_research_depth() -> int:
 
     # Define research depth options with their corresponding values
     DEPTH_OPTIONS = [
-        ("Shallow - Quick research, few debate and strategy discussion rounds", 1),
-        ("Medium - Middle ground, moderate debate rounds and strategy discussion", 3),
-        ("Deep - Comprehensive research, in depth debate and strategy discussion", 5),
+        ("Shallow (낮음) - 빠른 리서치, 최소한의 토론 및 전략 수립 진행", 1),
+        ("Medium (중간) - 균형 잡힌 리서치, 적절한 토론 및 전략 수립 진행", 3),
+        ("Deep (깊음) - 심층 분석, 아주 심도 있는 토론 및 종합 전략 수립 진행", 5),
     ]
 
     choice = questionary.select(
-        "Select Your [Research Depth]:",
+        "연구 분석 깊이(단계)를 선택해 주세요 (Select Your [Research Depth]):",
         choices=[
             questionary.Choice(display, value=value) for display, value in DEPTH_OPTIONS
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction="\n- 방향키로 이동\n- [Enter] 키로 선택",
         style=questionary.Style(
             [
                 ("selected", "fg:yellow noinherit"),
@@ -159,7 +159,7 @@ def select_research_depth() -> int:
     ).ask()
 
     if choice is None:
-        console.print("\n[red]No research depth selected. Exiting...[/red]")
+        console.print("\n[red]연구 깊이가 선택되지 않았습니다. 종료합니다...[/red]")
         exit(1)
 
     return choice
@@ -208,8 +208,8 @@ def select_openrouter_model() -> str:
 def _prompt_custom_model_id() -> str:
     """Prompt user to type a custom model ID."""
     return questionary.text(
-        "Enter model ID:",
-        validate=lambda x: len(x.strip()) > 0 or "Please enter a model ID.",
+        "커스텀 모델 ID를 입력해 주세요 (Enter model ID):",
+        validate=lambda x: len(x.strip()) > 0 or "유효한 모델 ID를 입력해 주세요.",
     ).ask().strip()
 
 
@@ -220,17 +220,17 @@ def _select_model(provider: str, mode: str) -> str:
 
     if provider.lower() == "azure":
         return questionary.text(
-            f"Enter Azure deployment name ({mode}-thinking):",
-            validate=lambda x: len(x.strip()) > 0 or "Please enter a deployment name.",
+            f"Azure deployment 이름을 입력해 주세요 ({mode}-thinking):",
+            validate=lambda x: len(x.strip()) > 0 or "deployment 이름을 입력해 주세요.",
         ).ask().strip()
 
     choice = questionary.select(
-        f"Select Your [{mode.title()}-Thinking LLM Engine]:",
+        f"사용할 [{mode.title()}-Thinking LLM 엔진]을 선택해 주세요:",
         choices=[
             questionary.Choice(display, value=value)
             for display, value in get_model_options(provider, mode)
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction="\n- 방향키로 이동\n- [Enter] 키로 선택",
         style=questionary.Style(
             [
                 ("selected", "fg:magenta noinherit"),
@@ -241,7 +241,7 @@ def _select_model(provider: str, mode: str) -> str:
     ).ask()
 
     if choice is None:
-        console.print(f"\n[red]No {mode} thinking llm engine selected. Exiting...[/red]")
+        console.print(f"\n[red]선택된 {mode} thinking llm 엔진이 없습니다. 종료합니다...[/red]")
         exit(1)
 
     if choice == "custom":
@@ -278,15 +278,16 @@ def select_llm_provider() -> tuple[str, str | None]:
         ("OpenRouter", "openrouter", "https://openrouter.ai/api/v1"),
         ("Azure OpenAI", "azure", None),
         ("Ollama", "ollama", ollama_url),
+        ("Local Custom LLM", "local", "http://localhost:8000/api/v1/chat"),
     ]
 
     choice = questionary.select(
-        "Select your LLM Provider:",
+        "사용할 LLM 공급자(Provider)를 선택해 주세요 (Select your LLM Provider):",
         choices=[
             questionary.Choice(display, value=(provider_key, url))
             for display, provider_key, url in PROVIDERS
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction="\n- 방향키로 이동\n- [Enter] 키로 선택",
         style=questionary.Style(
             [
                 ("selected", "fg:magenta noinherit"),
@@ -297,7 +298,7 @@ def select_llm_provider() -> tuple[str, str | None]:
     ).ask()
     
     if choice is None:
-        console.print("\n[red]No LLM provider selected. Exiting...[/red]")
+        console.print("\n[red]선택된 LLM 공급자가 없습니다. 종료합니다...[/red]")
         exit(1)
 
     provider, url = choice
@@ -307,12 +308,12 @@ def select_llm_provider() -> tuple[str, str | None]:
 def ask_openai_reasoning_effort() -> str:
     """Ask for OpenAI reasoning effort level."""
     choices = [
-        questionary.Choice("Medium (Default)", "medium"),
-        questionary.Choice("High (More thorough)", "high"),
-        questionary.Choice("Low (Faster)", "low"),
+        questionary.Choice("Medium (기본값)", "medium"),
+        questionary.Choice("High (더 깊고 정확한 분석)", "high"),
+        questionary.Choice("Low (더 빠른 시뮬레이션)", "low"),
     ]
     return questionary.select(
-        "Select Reasoning Effort:",
+        "추론 노력 수준(Reasoning Effort)을 선택해 주세요:",
         choices=choices,
         style=questionary.Style([
             ("selected", "fg:cyan noinherit"),
