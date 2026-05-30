@@ -69,7 +69,7 @@ graph TD
         RM -->|종합 연구 리포트 전달| Trader
         Trader -->|투자 거래 제안서| Risk
         Risk -->|위험 한도 브레이크 및 최종 통제안| PM
-        PM -->|최종 투자 결론 (BUY/HOLD/SELL) 및 한국어 금융 리포트 발행| Memory["누적 지식 기억 (Reflection Log)"]:::accent
+        PM -->|"최종 투자 결론 (BUY/HOLD/SELL) 및 한국어 금융 리포트 발행"| Memory["누적 지식 기억 (Reflection Log)"]:::accent
     end
 
     API <-->|"(3) 비침습적 상속 브릿지 (StreamingTradingAgentsGraph)"| Core_Quant_Engine
