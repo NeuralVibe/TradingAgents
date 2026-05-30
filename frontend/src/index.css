@@ -1,0 +1,276 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: dark;
+  color: #e1e4eb;
+  background-color: #0b0e11;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Bloomberg/TradingView Dark Design System Tokens */
+  --bg-main: #0b0e11;
+  --bg-panel: #161a22;
+  --bg-panel-hover: #1e2330;
+  --border-color: #242a36;
+  --text-primary: #e1e4eb;
+  --text-secondary: #848e9c;
+  --accent-bull: #00c076;       /* Neon Emerald */
+  --accent-bull-glow: rgba(0, 192, 118, 0.15);
+  --accent-bear: #ff3e5b;       /* Crimson Fire */
+  --accent-bear-glow: rgba(255, 62, 91, 0.15);
+  --accent-hold: #f3ba2f;       /* Gold */
+  --accent-hold-glow: rgba(243, 186, 47, 0.15);
+  --accent-blue: #2962ff;       /* TradingView Blue */
+  --accent-purple: #ab47bc;     /* Sentiment */
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #363c4e;
+}
+
+/* Pulsing dot animation */
+@keyframes pulse-dot {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+    box-shadow: 0 0 12px currentColor;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.5;
+  }
+}
+
+.pulse-animation {
+  animation: pulse-dot 1.8s infinite ease-in-out;
+}
+
+/* Grid & Layout Utilities */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 350px 1fr;
+  gap: 16px;
+  padding: 16px;
+  height: calc(100vh - 64px);
+  box-sizing: border-box;
+}
+
+@media (max-width: 1200px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}
+
+.panel {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.panel:hover {
+  border-color: #363c4e;
+}
+
+/* Premium Typography styling */
+h1, h2, h3, h4, h5, h6 {
+  margin-top: 0;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Card layout */
+.card {
+  background-color: #1e222d;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-blue);
+  background-color: #242a37;
+}
+
+/* Tab systems */
+.tab-container {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  color: var(--accent-blue);
+  border-bottom-color: var(--accent-blue);
+}
+
+/* Form Styles */
+input, select, textarea {
+  background-color: #1e222d;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(41, 98, 255, 0.2);
+}
+
+button {
+  background-color: var(--accent-blue);
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+button:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button:disabled {
+  background-color: #242a36;
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  transform: none;
+  opacity: 0.6;
+}
+
+/* Timeline/SSE tracker */
+.timeline-item {
+  position: relative;
+  padding-left: 28px;
+  padding-bottom: 20px;
+}
+
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 18px;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--border-color);
+}
+
+.timeline-item:last-child::before {
+  display: none;
+}
+
+.timeline-dot {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background-color: var(--border-color);
+  border: 2px solid var(--bg-panel);
+  transition: all 0.3s ease;
+  z-index: 2;
+}
+
+.timeline-item.active .timeline-dot {
+  background-color: var(--accent-blue);
+  box-shadow: 0 0 0 4px rgba(41, 98, 255, 0.2);
+}
+
+.timeline-item.completed .timeline-dot {
+  background-color: var(--accent-bull);
+}
+
+.timeline-item.failed .timeline-dot {
+  background-color: var(--accent-bear);
+}
+
+/* Terminal styled display */
+.terminal-block {
+  background-color: #0b0e11;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 12px;
+  overflow: auto;
+  max-height: 400px;
+  white-space: pre-wrap;
+  color: #38ef7d;
+  line-height: 1.6;
+}
