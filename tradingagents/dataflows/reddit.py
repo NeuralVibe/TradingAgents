@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger(__name__)
 
 _API = "https://www.reddit.com/r/{sub}/search.json?{qs}"
-_UA = "tradingagents/0.2 (+https://github.com/TauricResearch/TradingAgents)"
+_UA = "tradingagents/0.2 (+https://github.com/NeuralVibe/TradingAgents)"
 
 # Default subreddits ordered roughly by signal density for ticker-specific
 # discussion. wallstreetbets has the most volume but most noise; stocks /

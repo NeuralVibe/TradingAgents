@@ -61,7 +61,7 @@ app.include_router(market.router, prefix=settings.API_V1_STR)
 @app.get("/")
 async def root():
     return {
-        "message": "TradingAgents 고도화 API 서비스에 오신 것을 환영합니다.",
+        "message": "NeuralVibe TradingAgents 고도화 API 서비스에 오신 것을 환영합니다.",
         "version": "1.0.0",
         "language": "Korean (한국어)",
         "docs_url": "/docs"
