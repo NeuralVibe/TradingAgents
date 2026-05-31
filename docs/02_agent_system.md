@@ -177,6 +177,13 @@ graph TD
   * **입력 컨텍스트**: 리스크 심사 위원회 보고서, 트레이더 거래안, 과거 거래 평가 피드백(`past_context`)
   * **출력 데이터**: `state["final_trade_decision"]` (구조화 의사결정 보고서 `PortfolioDecision` 적재)
 
+### 6️⃣ VI. 실시간 뉴스 AI 해석 단계 (News AI Interpretation)
+* **실시간 뉴스 AI 해석기 (Symmetrical News AI Interpreter)**
+  * **소스 코드 위치**: `backend/app/routers/market.py`
+  * **진입점 함수**: `interpret_news(payload: NewsInterpretRequest)`
+  * **입력 컨텍스트**: `ticker`, `news_title`, `news_summary`, `provider`, `base_url`, `api_key`, `model_name`
+  * **출력 데이터**: `NewsInterpretResponse(interpretation=...)` (실시간 뉴스 마크다운 해설 반환)
+
 ---
 
 ## 💾 지속성 오답 메모리를 활용한 자가 성찰 루프 (Reflection Loop)

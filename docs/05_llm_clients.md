@@ -116,6 +116,14 @@ def create_llm_client(
 > **지연 로딩 (Lazy Import) 적용 효과**
 > * 본 플랫폼은 공급자 분기 내부 함수가 호출되는 정확한 시점에만 해당 외부 SDK 종속성 모듈을 임포트합니다. 이를 통해 서버 가동 및 테스트 탐색 단계를 밀리초(ms) 단위로 초고속화하며, 불필요한 API 키 누락 예외를 사전에 원천 차단합니다.
 
+### ⚙️ 2.3 대칭적 클라이언트 실행 환경 (Symmetrical Client Execution)
+
+본 플랫폼의 LLM 클라이언트 팩토리(`create_llm_client`)는 메인 멀티 에이전트 백테스트 시뮬레이션뿐만 아니라, **실시간 뉴스 AI 해석 마이크로 서비스(News AI Interpretation Service)**에서도 완전히 대칭적인 방식으로 호출되어 작동합니다.
+
+* **뉴스 AI 해석 프로세스**: 우측 사이드바의 실시간 뉴스 피드 영역에서 특정 뉴스를 선택하면, 사용자가 프론트엔드 설정창(Settings Modal)에 입력하고 로컬 스토리지(`localStorage`)에 저장해 둔 맞춤형 LLM 설정값(`provider`, `base_url`, `api_key`, `model_name`)이 [[06_backend_api.md]]의 `NewsInterpretRequest` 스키마를 통해 백엔드 라우터(`/api/v1/news/interpret`)로 송신됩니다.
+* **대칭형 초기화**: 백엔드 라우터는 전달받은 개별 매개변수를 활용하여 메인 에이전트 노드와 완전히 동일한 `create_llm_client` 팩토리를 통해 임시 `BaseLLMClient` 구현 인스턴스를 동적으로 인스턴스화하고, LangChain 메시지 프로토콜(`SystemMessage`, `HumanMessage`)을 거쳐 `llm.invoke()`를 대칭형으로 수행합니다.
+* **통일성 보장**: 이로써 주 트레이딩 파이프라인의 에이전트와 독립된 실시간 해석 기능이 완전히 통일된 LLM 커넥션 생태계를 공유하게 됩니다.
+
 ---
 
 ## 🤖 3. 도구 호출 에뮬레이터 (Custom Tool-Calling Emulator)
@@ -215,3 +223,70 @@ if raw_text_clean:
 > [!IMPORTANT]
 > **출력 상태 전이의 투명성**
 > * 만약 에뮬레이터가 유효한 도구 호출 JSON을 탐색해 냈을 경우, 생성된 `AIMessage` 객체의 `content`는 `""`(빈 문자열)로 설정되며 오직 `tool_calls` 필드에만 해당 매개변수 블록이 탑재됩니다. 툴 호출 조건이 성립하지 않은 일반 답변의 경우에는 원본 `raw_text`가 `content` 필드로 온전히 보존되어 상위 오케스트레이터로 흐릅니다.
+
+---
+
+## 🛡️ 4. 공급자별 특이 모형 제어 테이블 및 기능 바인딩 (Provider-Specific Model Catalog & Quirks)
+
+대형 언어 모델 공급사(OpenAI, Anthropic, Google Gemini, DeepSeek, MiniMax, Qwen 등)는 규격화된 OpenAI 호환성 모드를 제공할지라도, API 수준에서 허용하는 매개변수의 사소한 차이나 응답 데이터 구조의 파편화로 인해 시스템 에러를 빈번하게 유발합니다. 
+
+이를 단일하고 우아하게 통합 제어하기 위해 플랫폼의 LLM 클라이언트 레이어는 선언적 모형 제어 아키텍처를 도입했습니다.
+
+### 📋 4.1 선언적 모델 케이퍼빌리티 매핑 (`capabilities.py`)
+* **물리적 위치**: `tradingagents/llm_clients/capabilities.py` $\rightarrow$ [[capabilities.py#L31]]
+* **설계 철학**: 상위 에이전트 생성 팩토리 코드 내부에 특정 모델명을 하드코딩한 `if-else` 분기 사다리를 생성하는 대신, 모델의 고유 API 호환 스펙을 `ModelCapabilities` 데이터 클래스 형태로 중앙 선언 관리합니다.
+* **통제 매개변수 종류**:
+  * `supports_tool_choice` (bool): 모델이 툴 호출 선택 강제 파라미터(`tool_choice`)를 지원하는지 여부.
+  * `supports_json_mode` (bool): `response_format={"type":"json_object"}` 옵션을 지원하는지 여부.
+  * `preferred_structured_method` (StructuredMethod): 구조화된 출력 획득을 위해 권장되는 파이프라인 방식.
+  * `requires_reasoning_content_roundtrip` (bool): DeepSeek 계열 모델을 위한 사고 과정 히스토리 반환 필요 여부.
+  * `requires_reasoning_split` (bool): MiniMax 계열의 사고 블록 분할 지원 필요 여부.
+
+---
+
+### 🧠 4.2 DeepSeek 추론용 사고 블록 라운드트립 (`DeepSeekChatOpenAI`)
+* **물리적 위치**: `tradingagents/llm_clients/openai_client.py` $\rightarrow$ [[openai_client.py#L68]]
+* **장애 요인**: DeepSeek의 추론 특화형 모델(예: `deepseek-reasoner`, `deepseek-v4-pro` 등)은 API 호출 시 사고 과정(`reasoning_content`)이 담긴 메시지를 응답합니다. 그러나 랭체인 프롬프트 체인 상에서 다음 대화 턴(Next Turn)을 이어갈 때, 어시스턴트 메시지에 이전 턴의 `reasoning_content`를 그대로 메아리처럼 실어 전송(Roundtrip)해 주지 않으면 API 서버가 **HTTP 400 (Invalid Parameter)** 예외를 내며 즉시 런타임 크래시를 일으킵니다.
+* **해결 방안**: 
+  1. `DeepSeekChatOpenAI` 클래스는 `_create_chat_result` 메소드에서 반환된 원본 JSON 패킷 내부의 `choices[].message.reasoning_content`를 낚아채 `generation.message.additional_kwargs["reasoning_content"]`로 안전하게 바인딩하여 메모리에 이식합니다.
+  2. 차기 API 요청 발생 시, `_get_request_payload` 메소드가 동작하여 발송할 대화 배열 중 `AIMessage` 타입을 스캔한 후, `additional_kwargs`에 캐싱되어 있던 `reasoning_content` 값을 요청 바디(Body)의 `messages[].reasoning_content` 필드로 동적으로 재결합 및 동기화 합성하여 송신함으로써 API 충돌을 원천 차단합니다.
+  3. 또한, 이 모델들은 `tools` 필드는 수신하지만 `tool_choice` 파라미터가 명시되면 예외를 뱉으므로 `supports_tool_choice`를 `False`로 설정하여 해당 인자만을 동적으로 숨겨 전송합니다.
+
+---
+
+### 🛡️ 4.3 MiniMax 사고 오염 방지 및 스플릿 바인딩 (`MinimaxChatOpenAI`)
+* **물리적 위치**: `tradingagents/llm_clients/openai_client.py` $\rightarrow$ [[openai_client.py#L112]]
+* **장애 요인**: MiniMax M2.x 추론 모델들은 기본적으로 `<think>...</think>` 사고 블록을 일반 답변 문자열(`message.content`) 내부에 뒤섞어 리턴합니다. 이 원시 텍스트를 여과 없이 수집 보고서 필드에 기록하면, 보고서 마크다운 출력과 대시보드 화면이 기계어 사고 로그로 어지럽혀지는 텍스트 오염 현상이 터지게 됩니다.
+* **해결 방안**: 
+  1. `MinimaxChatOpenAI` 클래스는 요청 Payload 생성 시점(`_get_request_payload`)에 `ModelCapabilities`를 확인한 뒤, MiniMax 추론 플래그인 `reasoning_split=True` 속성을 요청 메시지 헤더 바디에 동적으로 주입합니다.
+  2. 이 플래그가 전송되면 MiniMax API는 사고 블록을 `content`에서 물리 분리하여 전용 `reasoning_details` 객체로만 출력하므로 사용자는 깨끗하게 가공된 최종 보고서 정보만을 취득할 수 있게 됩니다. (추론 기능이 없는 일반 MiniMax-Text-01 등의 모델은 해당 플래그를 수신할 시 에러를 유발하므로 케이퍼빌리티 기반으로 엄격하게 선별 주입됩니다.)
+
+---
+
+### 🪐 4.4 Google Gemini 지능형 씽킹 및 버젯 변환 (`GoogleClient`)
+* **물리적 위치**: `tradingagents/llm_clients/google_client.py` $\rightarrow$ [[google_client.py#L20]]
+* **장애 요인**: 구글의 Gemini 모델군은 생각 모드(Thinking Mode)를 적용하는 변수가 세대별로 다릅니다. Gemini 3 계열은 `thinking_level` 문자열 변수를 바로 수신하는 반면, Gemini 2.5 계열은 `thinking_budget` (정수 바이트 제한) 수치 매개변수를 전송해야 하여 두 API 설정이 상호 충돌하는 파편화를 낳습니다.
+* **해결 방안**: 
+  1. `GoogleClient` 클래스는 전역 환경에서 `thinking_level` 값을 수집한 후 현재 설정된 모델 문자열을 지능적으로 스캔합니다.
+  2. `gemini-3` 패턴이 감지되면 문자열 파라미터를 그대로 통과시키되, Gemini 3 Pro에서 지원하지 않는 유일한 옵션인 `"minimal"` 레벨은 `"low"` 단계로 실시간 자동 다운그레이드 매핑(Auto-downgrade mapping)하여 API 크래시를 예방합니다.
+  3. 만약 `gemini-2.5` 등 하위 레벨이 식별되면 `thinking_budget` 정수 체계로 매핑을 변환하며, 사용자가 `"high"` 레벨을 선택했을 때 동적 예산 활성화를 뜻하는 `-1`을, 그 외에는 씽킹 비활성화를 위해 `0` 값을 매핑 바인딩하여 안정적인 통신을 중재합니다.
+
+---
+
+### 🔌 4.5 Anthropic extended-thinking 씽킹 매개변수 통제 (`AnthropicClient`)
+* **물리적 위치**: `tradingagents/llm_clients/anthropic_client.py` $\rightarrow$ [[anthropic_client.py#L43]]
+* **장애 요인**: 앤트로픽의 확장형 생각 모드(Extended Thinking Mode) 변수인 `effort`는 오직 동적 자원이 확보된 Claude Opus 4.5+ 및 Sonnet 4.5+ 계열의 거대 flagship 모델만 지원합니다. 경량 모형인 Claude Haiku 시리즈에 이 파라미터가 섞여 유입되면, 서버는 즉시 **"This model does not support the effort parameter"** 예외를 던지며 연산을 거부합니다.
+* **해결 방안**:
+  1. `AnthropicClient` 클래스는 프롬프트 체인 점화 전에 `_supports_effort` 내부 헬퍼 함수를 기동하여 정규식 패턴(`re.compile(r"^claude-(opus|sonnet)-\d+-\d+$")`) 및 예외 등록 목록(`claude-mythos-preview`)과의 정확한 크기 비교 연산을 수행합니다.
+  2. 케이퍼빌리티 조건에 만족하지 않는 모형(Haiku 전체 계열 등)일 경우, 사용자가 전달한 설정 인자 목록에서 `effort` 속성을 물리적으로 자동 소멸 소거(Auto-suppression)한 후 안전한 잔여 옵션만 바인딩하여 백엔드로 디스패치합니다.
+
+---
+
+### 🥤 4.6 응답 데이터 블록 텍스트 표준화 및 정화 (`normalize_content`)
+* **물리적 위치**: `tradingagents/llm_clients/base_client.py` $\rightarrow$ [[base_client.py#L6]]
+* **장애 요인**: 최신 대형 언어 모델들(OpenAI Responses API, Google Gemini 3 등)은 추론 연산 강화의 영향으로 인해, 일반 자연어 텍스트 대신 `[{'type': 'reasoning', ...}, {'type': 'text', 'text': '...'}]` 와 같은 여러 형식 블록이 중첩 결합된 배열(List) 데이터를 기본 리턴값으로 돌려줍니다. 하위 에이전트 파이프라인 노드는 plain string 포맷의 보고서만을 가정하고 수많은 가공 함수를 엮어두었기 때문에, 가공되지 않은 복합 리스트가 통과하면 파이썬 문자열 연산(`split`, `replace` 등) 단계에서 타입 에러(`TypeError`)가 나며 시스템 전체가 뻗는 위기를 초래합니다.
+* **해결 방안**:
+  1. 모든 클라이언트의 `invoke` 진입로에 `normalize_content` 전처리 필터를 융합 이식했습니다.
+  2. 필터는 리턴된 데이터 타입이 `list` 구조임이 식별되면 내부의 블록들 중 오직 `type == 'text'` 에 귀속된 자연어 본문만을 선별적으로 긁어모아 공백 줄바꿈 문자열(`\n`)로 즉석 강제 정규화 병합(Conversion)하여 출력합니다.
+  3. 이 방어용 어댑터 레이어가 작동함으로써 복잡하게 반환된 추론 데이터 패킷조차 하부 에이전트들이 100% 안전하게 이해하고 요약할 수 있게 됩니다.
+

@@ -218,3 +218,42 @@ $$\text{Profit Factor} = \frac{\sum_{j \in Winning} Profit_j}{\sum_{k \in Losing
   * $\text{Profit Factor}$: 총 이익금 합산 대비 총 손실금 합산의 비율로, **1.5 이상이면 이익 수용력이 검증된 우수한 트레이딩 모델**로 해석합니다.
 
 * **관련 소스 코드 위치**: `backend/app/quant_engine.py` $\rightarrow$ [[quant_engine.py#L364]] `_calculate_backtest_summary` 메소드
+
+---
+
+## 📰 5. 실시간 뉴스 AI 해석 서비스 및 반-환각 예외 방어 (News AI Interpretation & Fallback)
+
+웹 대시보드의 우측 패널에 표시되는 실시간 경제 뉴스 피드는 단순 텍스트 표시를 넘어, 대화형 AI가 특정 종목에 미칠 거시/미시 경제적 파급력을 즉석에서 풀이해 주는 실시간 해석 API 서비스를 탑재하고 있습니다.
+
+### ⚙️ 5.1 동적 설정 연동 스키마 (`NewsInterpretRequest`)
+사용자가 설정창에서 수정한 커스텀 LLM 설정은 Pydantic 데이터 모델인 `NewsInterpretRequest`를 거쳐 타입 세이프하게 백엔드로 전송됩니다.
+* **소프트웨어 물리 구조**: `backend/app/schemas.py` $\rightarrow$ [[schemas.py#L133]]
+
+```python
+class NewsInterpretRequest(BaseModel):
+    ticker: str = Field(..., description="Stock ticker symbol")
+    news_title: str = Field(..., description="News title")
+    news_summary: str = Field(..., description="News body or summary")
+    provider: Optional[str] = Field("local", description="LLM provider")
+    base_url: Optional[str] = Field(None, description="LLM endpoint URL")
+    api_key: Optional[str] = Field(None, description="LLM Authentication API key")
+    model_name: Optional[str] = Field(None, description="LLM model identifier")
+```
+
+### 🛡️ 5.2 반-환각 방어 및 예외 차단 가이드라인 (Anti-Hallucination Fallback)
+* **소스 코드 위치**: `backend/app/routers/market.py` $\rightarrow$ [[market.py#L253]]
+* **동작 원리**: 
+  1. `/api/v1/news/interpret` 엔드포인트는 프론트엔드가 송신한 `NewsInterpretRequest`를 파싱하여 `create_llm_client`를 통해 LLM 클라이언트를 동적 할당합니다.
+  2. 만약 로컬 LLM 서버(예: LM Studio, Ollama)가 오프라인 상태이거나 네트워크 장애 등으로 인해 API 접속 실패 예외(`Exception`)가 검출될 경우, 이를 무조건 크래시로 처리해 버리거나 임의의 환각(Hallucination) 예측값을 생성해 사용자에게 잘못된 투자 힌트를 주지 않도록 **반-환각 프로토콜(Anti-Hallucination Protocol)**을 강력 구동합니다.
+  3. 예외 트랩(`except Exception`)에 포착되면, 에러를 숨기거나 임의의 시장 판별을 내리는 대신 사용자에게 **로컬 서버 작동 불능 상태 및 LMStudio 구성 요소 연결 상태를 직접 알리고 자가 해결법을 제안하는 표준 마크다운 경고 카드**를 온전히 조립하여 프론트엔드로 리턴합니다:
+
+```python
+fallback_interpretation = (
+    f"### ⚠️ [AI 분석 지연 안내] {ticker} 분석 보고서\n\n"
+    f"- **오류 내용**: 현재 AI 분석 모델 엔진(LLM)과의 연결이 끊겼거나 응답이 지연되고 있습니다.\n"
+    f"- **안내 가이드**: 백엔드 로컬 LLM 서버(LMStudio) 작동 상태를 점검해 주십시오. 연결이 복구되면 즉시 정상적인 AI 해설을 받아보실 수 있습니다."
+)
+```
+
+이 고도화된 방어 장치는 잘못된 기계적 분석 데이터로 초보 투자자가 잘못된 판단을 내릴 가능성을 사전에 차단하며, 시스템의 실시간 유지보수성과 진단성을 획기적으로 향상시킵니다.
+

@@ -16,37 +16,62 @@
 
 ```mermaid
 graph TD
-    %% 컴포넌트 트리
-    App["상위 컴포넌트<br/>App.tsx<br/>- state: currentRun, selectedRun<br/>- SSE: EventSource listener"]
+    App["상위 컴포넌트 App.tsx <br/> - state: currentRun, selectedRun, llmConfig<br/> - SSE: EventSource stream listener<br/> - Settings Modal: localStorage sync"]
     
-    App -->|"[1] runs list, selectedRunId"| AppCSS["스타일 레이어<br/>App.css / index.css"]
-    App -->|"[2] triggerSubmit 호출"| RunForm["파라미터 입력 및 트리거 폼<br/>components/RunForm.tsx"]
-    App -->|"[3] progress, current_step, logs"| Timeline["실시간 타임라인 로그<br/>components/Timeline.tsx"]
-    App -->|"[4] ticker, market_data, indicators"| ChartPanel["금융 시각화 차트<br/>components/ChartPanel.tsx"]
-    App -->|"[5] detailed_reports, agent_decisions"| ReportDetails["마크다운 종합 회의록<br/>components/ReportDetails.tsx"]
-
-    %% 데이터 단방향 흐름 표시
+    subgraph BloombergLayout ["글로벌 3단 레이아웃 (Bloomberg-Style 3-Column Layout)"]
+        %% 좌측 패널
+        LeftPanel["좌측 패널 (Left Panel) <br/> - 폭 15-20% 고정"]
+        RunForm["실행 설정 Form 컴포넌트 <br/> RunForm.tsx"]
+        History["시뮬레이션 히스토리 리스트 <br/> Run History Scroll List"]
+        
+        LeftPanel --> RunForm
+        LeftPanel --> History
+        
+        %% 중앙 메인 워크스페이스
+        CenterPanel["중앙 패널 (Center Panel - Main Workspace) <br/> - 폭 60-65% 메인 영역"]
+        ChartPanel["주가 캔들스틱 차트 컴포넌트 <br/> ChartPanel.tsx <br/> - Lightweight-Charts 캔들 및 이평선<br/> - 매수/매도 삼각형 마커 시각화"]
+        Timeline["유나이티드 에이전트 워크스페이스 <br/> Timeline.tsx <br/> - 노드 기반 파이프라인 흐름도<br/> - 대비/중재/평가 노드 연동<br/> - 고대비 SVG 커넥터 라인"]
+        
+        CenterPanel --> ChartPanel
+        CenterPanel --> Timeline
+        
+        %% 우측 패널
+        RightPanel["우측 패널 (Right Panel) <br/> - 폭 15-20% 고정"]
+        NewsFeed["실시간 뉴스 및 거시 지표 피드 <br/> Real-time News Feed <br/> - 마크다운 해석 모듈 탑재<br/> - 단어 자동 개행 및 오버플로우 방지"]
+        
+        RightPanel --> NewsFeed
+    end
+    
+    App --> LeftPanel
+    App --> CenterPanel
+    App --> RightPanel
+    
     style App fill:#003366,stroke:#33ccff,stroke-width:2px,color:#fff
-    style RunForm fill:#1a1a1a,stroke:#e6007e,stroke-width:2px,color:#fff
-    style Timeline fill:#1a1a1a,stroke:#00ffcc,stroke-width:2px,color:#fff
-    style ChartPanel fill:#1a1a1a,stroke:#ffcc00,stroke-width:2px,color:#fff
-    style ReportDetails fill:#1a1a1a,stroke:#ab47bc,stroke-width:2px,color:#fff
+    style LeftPanel fill:#1a1a1a,stroke:#e6007e,stroke-width:1px,color:#fff
+    style CenterPanel fill:#1a1a1a,stroke:#00ffcc,stroke-width:1px,color:#fff
+    style RightPanel fill:#1a1a1a,stroke:#ffcc00,stroke-width:1px,color:#fff
+    style RunForm fill:#2d2d2d,stroke:#e6007e,stroke-width:2px,color:#fff
+    style History fill:#2d2d2d,stroke:#e6007e,stroke-width:2px,color:#fff
+    style ChartPanel fill:#2d2d2d,stroke:#ffcc00,stroke-width:2px,color:#fff
+    style Timeline fill:#2d2d2d,stroke:#00ffcc,stroke-width:2px,color:#fff
+    style NewsFeed fill:#2d2d2d,stroke:#ffcc00,stroke-width:2px,color:#fff
 ```
 
 ### 📋 1.2 하부 컴포넌트별 렌더링 명세 및 역할
 
 * **`RunForm.tsx` (분석 파라미터 조종간)**
-  * **목적**: 대상 티커 코드, 분석 기준 날짜를 검증 및 수집하여 백엔드 포스트 호출(`POST /api/v1/runs`)을 수행하는 트리거 폼 컴포넌트입니다.
+  * **목적**: 대상 티커 코드, 분석 기준 날짜, 토론 라운드 횟수, 리스크 모델 가중치를 검증 및 수집하여 백엔드 포스트 호출(`POST /api/v1/runs`)을 수행하는 트리거 폼 컴포넌트입니다.
   * **소스 코드 위치**: `frontend/src/components/RunForm.tsx` $\rightarrow$ [[RunForm.tsx#L1]]
-* **`Timeline.tsx` (실시간 진행 바)**
-  * **목적**: 백엔드가 전송하는 SSE 실시간 이벤트를 수집하여, 현재 구동 중인 에이전트 노드 상태(시장분석, 토론중, 결제완료 등)와 실시간 타임라인 진행률 바를 렌더링합니다.
+* **`Timeline.tsx` (유나이티드 에이전트 워크스페이스 - 노드 기반 흐름도)**
+  * **목적**: 백엔드가 전송하는 SSE 실시간 이벤트를 수집하여, 시장 분석/토론/리스크 평가/최종 의사결정 등 에이전트 구동 파이프라인의 각 처리 노드와 고대비 연결선을 실시간 시각화하고, 개별 노드 클릭 시 디버그 로그와 마크다운 최종 보고서를 팝업으로 표출하는 통합 워크스페이스입니다.
   * **소스 코드 위치**: `frontend/src/components/Timeline.tsx` $\rightarrow$ [[Timeline.tsx#L1]]
-* **`ChartPanel.tsx` (금융 시각화 캔버스)**
-  * **목적**: 백테스트 완료 데이터를 근거로, 주가 캔들스틱 시계열, 매매 체결 화살표 마커 및 목표 익절가/손절가/매수진입 가격 앵커 라인을 오버레이 렌더링합니다.
-  * **소스 코드 위치**: `frontend/src/components/ChartPanel.tsx` $\rightarrow$ [[ChartPanel.tsx#L122]]
-* **`ReportDetails.tsx` (마크다운 리포트 디스플레이)**
-  * **목적**: 4대 애널리스트가 수립한 정성 보고서와 연구 팀의 찬반 회의록 텍스트를 파싱하여 이쁘게 정렬된 마크다운 카드 리스트 형태로 화면에 출력합니다.
-  * **소스 코드 위치**: `frontend/src/components/ReportDetails.tsx` $\rightarrow$ [[ReportDetails.tsx#L1]]
+* **`ChartPanel.tsx` (캔들스틱 및 테크니컬 차트)**
+  * **목적**: `lightweight-charts` 엔진을 기반으로, OHLCV 주가 캔들스틱, 이동평균선(EMA 10, SMA 50, SMA 200), 포트폴리오 매니저의 매매 체결 마커(BUY: 녹색 상향 삼각형, SELL: 적색 하향 삼각형), 그리고 의사결정 3대 가격선(진입가, 익절가, 손절가)을 실시간 GPU 가속 캔버스 위에 고속으로 렌더링합니다.
+  * **소스 코드 위치**: `frontend/src/components/ChartPanel.tsx` $\rightarrow$ [[ChartPanel.tsx#L1]]
+* **`News Feed` (실시간 뉴스 및 AI 마이크로 해석 레이어)**
+  * **목적**: 대상 기업에 특화된 최신 마켓 헤드라인 뉴스를 수집 표출하며, 특정 뉴스 카드 클릭 시 사용자의 맞춤형 API 환경 설정을 활용하여 해당 뉴스가 주가에 미칠 임팩트를 AI로 동적 요약 해석하는 뷰 포트폴리오입니다.
+  * **CSS 및 스타일**: 단어 잘림 및 가로 넘침으로 인한 레이아웃 깨짐 현상을 사전에 방어하기 위해 strict boundary containment 기법이 적용되어 있습니다.
+  * **소스 코드 위치**: `frontend/src/App.tsx` $\rightarrow$ [[App.tsx#L400]] (뉴스 피드 렌더러 파트)
 
 ---
 
@@ -176,3 +201,67 @@ const parseQuantPriceLevels = (decisionText: string | null | undefined, fallback
 ```
 
 * **동적 가격선 렌더링**: 이렇게 추출된 세 가격 수준(`entry`, `target`, `stopLoss`)은 `createPriceLine` 라이브러리 함수를 통해 차트 위에 실시간으로 오버레이 점선으로 동적 렌더링되어 사용자가 시각적으로 거래 전략 범위를 인지하도록 돕습니다.
+
+---
+
+## 🏛️ 4. Bloomberg-Style 글로벌 3단 레이아웃 및 CSS 설계
+
+대시보드 화면을 금융 엔터프라이즈 터미널 수준으로 끌어올리기 위해 전역 레이아웃을 3개 컬럼의 독립 스크롤 구조로 고도화했습니다.
+
+### 📊 4.1 3-Column 레이아웃 명세
+* **좌측 패널 (Left Panel: 15~20% 폭)**
+  * **주요 구성**: `RunForm` 조작 컨트롤 및 백테스트 실행 히스토리 리스크 패널.
+  * **기능**: 사용자는 종목 티커, 타겟 날짜 등을 설정하고 하단에서 이전에 수행된 시뮬레이션 결과 리스트를 선택/복구할 수 있습니다.
+* **중앙 패널 (Center Panel: 60~65% 폭 - 메인 워크스페이스)**
+  * **주요 구성**: 상단은 Lightweight-Charts 주가 차트, 하단은 랭그래프 에이전트 파이프라인 노드 뷰어(`Timeline.tsx`).
+  * **기능**: 차트 분석과 에이전트의 사고 흐름을 한 화면에 결합한 핵심 작업 공간입니다.
+* **우측 패널 (Right Panel: 15~20% 폭)**
+  * **주요 구성**: 실시간 경제 뉴스 피드 카드 리스트 및 뉴스별 AI 해석 패널.
+
+### 🛡️ 4.2 레이아웃 넘침 방지(Clipping Fix) 및 반응형 CSS
+우측 뉴스 카드의 텍스트가 경계면 밖으로 삐져나오거나 잘리는 치명적인 CSS 버그를 방지하기 위해 다음과 같은 엄격한 레이아웃 정책이 반영되어 있습니다:
+* **그리드 규격 표준화**: `frontend/src/index.css` [[index.css#L85]]
+  ```css
+  .dashboard-grid {
+      display: grid;
+      grid-template-columns: 240px 1fr 260px;
+      gap: 1.5rem;
+      width: 100%;
+      height: calc(100vh - 80px);
+      box-sizing: border-box;
+  }
+  ```
+* **사이드바 고정 폭 마스킹**: 우측 `.panel` 및 카드의 `width`를 `100%`, `maxWidth`를 `260px`로 한계 짓고 `box-sizing: border-box`, `overflow-x: hidden`을 강제하여 레이아웃 이탈을 방어합니다.
+* **텍스트 자동 줄바꿈 강제**: 뉴스 요약본이나 마크다운 컴파일러 본문 텍스트 내에서 가로 스크롤이 유발되는 것을 방지하기 위해 `word-break: break-all`, `white-space: normal`, `flex: 1` 스타일링 속성을 모든 본문 컴포넌트에 부여했습니다.
+
+---
+
+## ⚙️ 5. 사용자 환경 설정 모달 및 localStorage 영속성 (Settings Modal)
+
+사용자가 API 환경을 자유롭게 수정하여 자신만의 로컬 또는 클라우드 LLM을 대시보드에 다이렉트 연동할 수 있도록 환경 설정 모달을 구현했습니다.
+
+### ❓ 5.1 CSS 기반 지능형 툴팁 시스템
+* 각 설정 항목 옆에는 `❓` 모양의 도움말 버튼이 배치되어 있으며, 마우스를 올릴 시(Hover) React의 무거운 리렌더링 쓰레싱을 타지 않고 CSS 선택자(`::after`, `content`)만을 활용해 고속으로 툴팁 정보 팝업을 띄우도록 가벼운 순수 스타일 레이어로 빌드되었습니다.
+
+### 💾 5.2 localStorage 상태 동기화 및 런타임 영속화
+* 사용자가 입력한 `API Base URL`과 `API Key`는 입력 즉시 브라우저의 로컬 스토리지(`localStorage.setItem`)에 직렬화 저장됩니다.
+* 페이지를 새로고침(`F5`)하거나 브라우저를 완전히 껐다 켜더라도 초기 React 상태 선언 시 `localStorage.getItem`으로부터 값을 즉석 복구(Hydration)해 오므로, 매번 API Key를 다시 입력해야 하는 번거로움이 완벽히 해결되었습니다.
+* 이 데이터는 [[05_llm_clients.md]]에서 다룬 바 있는 Symmetrical API 스펙을 통해 실시간 뉴스 AI 해석 백엔드로 자동 동기화 송신됩니다.
+
+---
+
+## 🤖 6. 유나이티드 에이전트 워크스페이스 & 인터랙티브 차트 고도화
+
+### 🔗 6.1 노드 파이프라인 흐름도 (`Timeline.tsx`)
+텍스트 로그 출력 방식을 완벽하게 대체하여, 멀티 에이전트의 분석 전 단계를 시각적 노드로 연결한 파이프라인 흐름도 컴포넌트를 탑재했습니다:
+* **연결 흐름**: `Market Analyst` $\rightarrow$ `Bull/Bear Debate` $\rightarrow$ `Risk Manager` $\rightarrow$ `Portfolio Manager (PM)`로 이어지는 흐름을 네온 고대비 컬러의 SVG 경로 선(Path)으로 정교하게 드로잉합니다.
+* **듀얼 모달 (Dual Log/Report Modal)**: 각 노드는 에이전트의 작동 상태에 따라 실시간 색상 상태 전이를 보이며, 노드를 클릭할 시 우측에서 해당 노드의 실시간 **로직 추적 로그(Raw Debug Logs)**와 정제되어 렌더링된 **최종 의사결정 보고서(Rendered Report)**를 탭 형태로 함께 확인 가능한 복합 디스플레이 모달을 전격 제공합니다.
+
+### 📈 6.2 캔들스틱 및 매매 체결 마커 시각화 (`ChartPanel.tsx`)
+주가 차트 패널은 단순 캔들 드로잉을 넘어 백테스팅 엔진의 정량 매매 체결 이벤트를 함께 오버레이합니다:
+* **이동평균선 중첩(Overlay)**: EMA 10(단기), SMA 50(중기), SMA 200(장기) 라인을 색상 구분을 통해 주가 캔들 위에 겹쳐서 오버레이 드로잉합니다.
+* **매매 체결 마커 (Execution Markers)**: 백테스트 데이터 중 에이전트의 거래가 실제 성사된 체결 일자에 마커를 꼽습니다. 
+  * `BUY` 일자: 캔들 하단에 녹색 상향 삼각형(`aboveBar = false`, `shape = 'arrowUp'`, `color = '#26a69a'`) 마커 생성.
+  * `SELL` 일자: 캔들 상단에 적색 하향 삼각형(`aboveBar = true`, `shape = 'arrowDown'`, `color = '#ef5350'`) 마커 생성.
+* **반응형 리사이저 (Responsive Resize Handler)**: 웹 브라우저 창 크기가 조절되거나 Bloomberg 3단 레이아웃 폭이 변경될 시, `ResizeObserver` 및 윈도우 리사이즈 이벤트 리스너를 감지해 차트 컨테이너의 가로/세로 캔버스 픽셀 크기를 자동으로 픽셀 단위 맞춤 갱신함으로써 깨짐 현상을 원천 방지합니다.
+
