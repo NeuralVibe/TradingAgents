@@ -84,11 +84,13 @@ body {
 /* Grid & Layout Utilities */
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 350px 1fr;
-  gap: 16px;
-  padding: 16px;
-  height: calc(100vh - 64px);
+  grid-template-columns: 240px 1fr 260px;
+  gap: 12px;
+  padding: 12px;
+  flex: 1;
+  min-height: 0;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 @media (max-width: 1200px) {

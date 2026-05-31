@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 
 from .config import settings
 from .database import engine, Base
-from .routers import runs, market
+from . import models
+from .routers import runs, market, backtest
+from .routers.market import news_router
 from .services import simulation_service
 
 # Setup logging
@@ -57,6 +59,8 @@ app.add_middleware(
 # Include routers
 app.include_router(runs.router, prefix=settings.API_V1_STR)
 app.include_router(market.router, prefix=settings.API_V1_STR)
+app.include_router(news_router, prefix=settings.API_V1_STR)
+app.include_router(backtest.router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():

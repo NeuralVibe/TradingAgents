@@ -40,42 +40,81 @@ const parseQuantPriceLevels = (decisionText: string | null | undefined, fallback
   }
   
   // 가격 정규식 (예: $150.25, 150.25, 150달러, 150,000원 등)
+  const priceRegexGlobal = /(?:\$|₩)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:달러|원)?/gi;
   const priceRegex = /(?:\$|₩)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:달러|원)?/i;
   
+  // 50%를 넘는 괴리는 노이즈(예: 베타 2.24, 비중 50%, 8% 등)로 필터링
+  const maxDeviation = 0.5;
+  const isReasonable = (val: number) => {
+    if (isNaN(val) || val <= 0) return false;
+    return Math.abs(val - fallbackPrice) / fallbackPrice <= maxDeviation;
+  };
+
   const lines = decisionText.split("\n");
   for (const line of lines) {
     const lowerLine = line.toLowerCase();
     
-    // 1. 매수진입가 파싱
-    if (lowerLine.includes("매수가") || lowerLine.includes("진입") || lowerLine.includes("entry") || lowerLine.includes("구매")) {
-      const match = line.match(priceRegex);
-      if (match) {
-        const val = parseFloat(match[1].replace(/,/g, ""));
-        if (!isNaN(val) && val > 0) entry = val;
+    // 라인 전체에서 합리적인 가격 후보들을 모두 추출
+    const candidates: number[] = [];
+    const matches = line.matchAll(priceRegexGlobal);
+    for (const m of matches) {
+      const val = parseFloat(m[1].replace(/,/g, ""));
+      if (isReasonable(val)) {
+        candidates.push(val);
       }
     }
-    // 2. 익절목표가 파싱
-    if (lowerLine.includes("목표가") || lowerLine.includes("익절") || lowerLine.includes("target") || lowerLine.includes("매도가")) {
-      const match = line.match(priceRegex);
-      if (match) {
-        const val = parseFloat(match[1].replace(/,/g, ""));
-        if (!isNaN(val) && val > 0) target = val;
+
+    if (candidates.length === 0) {
+      const singleMatch = line.match(priceRegex);
+      if (singleMatch) {
+        const val = parseFloat(singleMatch[1].replace(/,/g, ""));
+        if (isReasonable(val)) {
+          candidates.push(val);
+        }
       }
     }
-    // 3. 손절라인 파싱
-    if (lowerLine.includes("손절") || lowerLine.includes("stop loss") || lowerLine.includes("stop-loss") || lowerLine.includes("손절라인")) {
-      const match = line.match(priceRegex);
-      if (match) {
-        const val = parseFloat(match[1].replace(/,/g, ""));
-        if (!isNaN(val) && val > 0) stopLoss = val;
+
+    if (candidates.length > 0) {
+      // fallbackPrice와 가장 가까운 최선의 매칭 후보를 기본값으로 설정
+      const bestCandidate = candidates.reduce((prev, curr) => 
+        Math.abs(curr - fallbackPrice) < Math.abs(prev - fallbackPrice) ? curr : prev
+      );
+
+      // 1. 매수진입가 파싱
+      if (lowerLine.includes("매수") || lowerLine.includes("진입") || lowerLine.includes("entry") || lowerLine.includes("구매") || lowerLine.includes("매입")) {
+        entry = bestCandidate;
+      }
+      // 2. 익절목표가 파싱
+      if (lowerLine.includes("목표") || lowerLine.includes("익절") || lowerLine.includes("target") || lowerLine.includes("매도") || lowerLine.includes("tp")) {
+        // 익절은 fallbackPrice보다 큰 값을 선호
+        const targetCandidates = candidates.filter(c => c > fallbackPrice * 0.95);
+        if (targetCandidates.length > 0) {
+          target = targetCandidates.reduce((prev, curr) => 
+            Math.abs(curr - fallbackPrice * 1.15) < Math.abs(prev - fallbackPrice * 1.15) ? curr : prev
+          );
+        } else {
+          target = bestCandidate;
+        }
+      }
+      // 3. 손절라인 파싱
+      if (lowerLine.includes("손절") || lowerLine.includes("stop loss") || lowerLine.includes("stop-loss") || lowerLine.includes("sl")) {
+        // 손절은 fallbackPrice보다 작은 값을 선호
+        const stopCandidates = candidates.filter(c => c < fallbackPrice * 1.05);
+        if (stopCandidates.length > 0) {
+          stopLoss = stopCandidates.reduce((prev, curr) => 
+            Math.abs(curr - fallbackPrice * 0.95) < Math.abs(prev - fallbackPrice * 0.95) ? curr : prev
+          );
+        } else {
+          stopLoss = bestCandidate;
+        }
       }
     }
   }
   
   // 합리적 보정: 가격이 너무 터무니없게 잡혔을 경우에 대한 예외 처리
-  if (entry <= 0) entry = fallbackPrice;
-  if (target <= entry) target = entry * 1.15;
-  if (stopLoss >= entry) stopLoss = entry * 0.95;
+  if (entry <= 0 || !isReasonable(entry)) entry = fallbackPrice;
+  if (target <= entry || !isReasonable(target)) target = entry * 1.15;
+  if (stopLoss >= entry || !isReasonable(stopLoss)) stopLoss = entry * 0.95;
   
   return { entry, target, stopLoss };
 };
@@ -288,12 +327,28 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
         let markerType = "circle";
         let markerPosition = "aboveBar";
 
-        if (recommendation === "BUY") {
+        const recUpper = recommendation ? recommendation.toUpperCase() : "";
+        if (recUpper === "STRONG BUY" || recUpper === "강력 매수" || recUpper === "강력매수") {
+          markerColor = "#00e676";
+          markerText = "★ STRONG BUY";
+          markerType = "arrowUp";
+          markerPosition = "belowBar";
+        } else if (recUpper === "BUY" || recUpper === "매수") {
           markerColor = "#00c076";
           markerText = "★ BUY 추천";
           markerType = "arrowUp";
           markerPosition = "belowBar";
-        } else if (recommendation === "SELL") {
+        } else if (recUpper === "OVERWEIGHT" || recUpper === "비중확대" || recUpper === "비중 확대" || recUpper === "매수 대기" || recUpper === "매수대기") {
+          markerColor = "#81c784";
+          markerText = "★ OVERWEIGHT";
+          markerType = "arrowUp";
+          markerPosition = "belowBar";
+        } else if (recUpper === "UNDERWEIGHT" || recUpper === "비중축소" || recUpper === "비중 축소") {
+          markerColor = "#e57373";
+          markerText = "▼ UNDERWEIGHT";
+          markerType = "arrowDown";
+          markerPosition = "aboveBar";
+        } else if (recUpper === "SELL" || recUpper === "매도") {
           markerColor = "#ff3e5b";
           markerText = "▼ SELL 추천";
           markerType = "arrowDown";

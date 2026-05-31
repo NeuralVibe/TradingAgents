@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, String, Float, DateTime, Text
+from sqlalchemy import Column, String, Float, DateTime, Text, Integer
 from .database import Base
 
 class SimulationRun(Base):
@@ -18,3 +18,23 @@ class SimulationRun(Base):
     
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class Decision(Base):
+    __tablename__ = "decisions"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    run_id = Column(String, index=True, nullable=True)
+    ticker = Column(String, index=True, nullable=False)
+    decision_date = Column(String, index=True, nullable=False)
+    side = Column(String, nullable=False)  # BUY, SELL, HOLD
+    confidence = Column(Float, nullable=False)
+    horizon_days = Column(Integer, nullable=False)
+    price_target = Column(Float, nullable=True)
+    realized_return = Column(Float, nullable=True)
+    realized_alpha = Column(Float, nullable=True)
+    reflection = Column(Text, nullable=True)
+    raw_json = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
