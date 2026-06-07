@@ -167,12 +167,79 @@ class BacktestEngine:
             else:
                 df = pd.DataFrame({tickers[0]: data["Close"]})
                 
-            # Fill missing prices safely
-            df = df.ffill().bfill()
+            # Forward-fill only. Backfilling would leak future prices into
+            # earlier dates and can create invalid pre-listing trades.
+            df = df.ffill()
             return df
         except Exception as e:
             logger.error(f"Error downloading prices for backtest: {str(e)}")
             return pd.DataFrame()
+
+    @staticmethod
+    def fetch_ohlc_history(tickers: List[str], start_date: str, end_date: str) -> pd.DataFrame:
+        """Download OHLC price data for stop-loss and take-profit simulation."""
+        if not tickers:
+            return pd.DataFrame()
+
+        start_dt = (datetime.datetime.strptime(start_date, "%Y-%m-%d") - datetime.timedelta(days=10)).strftime("%Y-%m-%d")
+        end_dt = (datetime.datetime.strptime(end_date, "%Y-%m-%d") + datetime.timedelta(days=10)).strftime("%Y-%m-%d")
+        fields = ["Open", "High", "Low", "Close"]
+
+        try:
+            data = yf.download(tickers, start=start_dt, end=end_dt, auto_adjust=True, progress=False)
+            if data.empty:
+                return pd.DataFrame()
+
+            if isinstance(data.columns, pd.MultiIndex):
+                available_fields = [f for f in fields if f in data.columns.get_level_values(0)]
+                return data[available_fields].ffill() if available_fields else pd.DataFrame()
+
+            ticker = tickers[0]
+            frames = {
+                field: pd.DataFrame({ticker: data[field]})
+                for field in fields
+                if field in data.columns
+            }
+            if not frames:
+                return pd.DataFrame()
+            ohlc = pd.concat(frames, axis=1)
+            return ohlc.ffill()
+        except Exception as e:
+            logger.error(f"Error downloading OHLC prices for backtest: {str(e)}")
+            return pd.DataFrame()
+
+    @staticmethod
+    def _optional_float(value: Any) -> Optional[float]:
+        if value is None or value == "":
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if pd.isna(parsed):
+            return None
+        return parsed
+
+    @staticmethod
+    def _get_ohlc_value(ohlc_df: pd.DataFrame, dt: pd.Timestamp, ticker: str, field: str) -> Optional[float]:
+        if ohlc_df is None or ohlc_df.empty:
+            return None
+        try:
+            if isinstance(ohlc_df.columns, pd.MultiIndex):
+                if (field, ticker) in ohlc_df.columns:
+                    value = ohlc_df.loc[dt, (field, ticker)]
+                elif (ticker, field) in ohlc_df.columns:
+                    value = ohlc_df.loc[dt, (ticker, field)]
+                else:
+                    return None
+            elif field in ohlc_df.columns:
+                value = ohlc_df.loc[dt, field]
+            else:
+                return None
+            value = float(value)
+            return None if pd.isna(value) else value
+        except (KeyError, TypeError, ValueError):
+            return None
 
     @classmethod
     def run_portfolio_backtest(
@@ -201,6 +268,13 @@ class BacktestEngine:
         prices_df = cls.fetch_price_history(all_tickers, start_date, end_date)
         if prices_df.empty or benchmark not in prices_df.columns:
             return cls._empty_backtest_result(start_date, end_date, initial_capital)
+        needs_ohlc = any(
+            s.get("stop_loss") is not None
+            or s.get("take_profit") is not None
+            or s.get("trailing_stop_pct") is not None
+            for s in signals
+        )
+        ohlc_df = cls.fetch_ohlc_history(all_tickers, start_date, end_date) if needs_ohlc else pd.DataFrame()
             
         # Build date list index within bounds
         sd_dt = pd.to_datetime(start_date)
@@ -210,12 +284,17 @@ class BacktestEngine:
         if len(trading_dates) == 0:
             return cls._empty_backtest_result(start_date, end_date, initial_capital)
             
-        # Group signals by date for O(1) retrieval during daily loop
-        signals_by_date = {}
+        # Schedule each signal for the first available trading date after
+        # its decision date. Same-day execution would look ahead.
+        signals_by_entry_date = {}
         for s in signals:
             try:
-                sig_date = pd.to_datetime(s["date"]).strftime("%Y-%m-%d")
-                signals_by_date.setdefault(sig_date, []).append(s)
+                sig_dt = pd.to_datetime(s["date"])
+                entry_idx = trading_dates.searchsorted(sig_dt, side="right")
+                if entry_idx >= len(trading_dates):
+                    continue
+                entry_date = trading_dates[entry_idx].strftime("%Y-%m-%d")
+                signals_by_entry_date.setdefault(entry_date, []).append(s)
             except Exception:
                 continue
 
@@ -243,13 +322,29 @@ class BacktestEngine:
             exited_positions = []
             active_positions = []
             for pos in open_positions:
-                # Reached exit date if trading days count >= horizon_days
                 pos["days_held"] += 1
-                if pos["days_held"] >= pos["horizon_days"] or i == len(trading_dates) - 1:
-                    # Close position
-                    ticker = pos["ticker"]
+                ticker = pos["ticker"]
+                exit_price = None
+                exit_reason = None
+
+                low = cls._get_ohlc_value(ohlc_df, dt, ticker, "Low")
+                high = cls._get_ohlc_value(ohlc_df, dt, ticker, "High")
+                stop_loss = pos.get("stop_loss")
+                take_profit = pos.get("take_profit")
+
+                # Conservative rule: if both are hit in one daily bar, stop-loss wins.
+                if stop_loss is not None and low is not None and low <= stop_loss:
+                    exit_price = stop_loss
+                    exit_reason = "stop_loss"
+                elif take_profit is not None and high is not None and high >= take_profit:
+                    exit_price = take_profit
+                    exit_reason = "take_profit"
+                elif pos["days_held"] >= pos["horizon_days"] or i == len(trading_dates) - 1:
                     exit_price = float(prices_df.loc[dt, ticker])
-                    
+                    exit_reason = "horizon" if pos["days_held"] >= pos["horizon_days"] else "end_of_backtest"
+
+                if exit_reason is not None:
+                    # Close position
                     # Deduct slippage on sell
                     final_exit_price = exit_price * (1.0 - slippage)
                     exit_value = pos["shares"] * final_exit_price
@@ -274,6 +369,10 @@ class BacktestEngine:
                         "side": pos["side"],
                         "confidence": pos["confidence"],
                         "horizon_days": pos["horizon_days"],
+                        "exit_reason": exit_reason,
+                        "stop_loss": pos.get("stop_loss"),
+                        "take_profit": pos.get("take_profit"),
+                        "trailing_stop_pct": pos.get("trailing_stop_pct"),
                         "raw_return": round(raw_return, 4),
                         "alpha_return": round(alpha_return, 4),
                         "profit": round(profit, 2),
@@ -289,8 +388,8 @@ class BacktestEngine:
             positions_value = sum([p["shares"] * float(prices_df.loc[dt, p["ticker"]]) for p in open_positions])
             portfolio_value = cash + positions_value
             
-            # 3. Enter new positions from signals on this date
-            day_signals = signals_by_date.get(dt_str, [])
+            # 3. Enter new positions scheduled for this trading date
+            day_signals = signals_by_entry_date.get(dt_str, [])
             # Filter only BUY signals (SELL indicates exiting/holding short, but we primarily support long-only for now)
             valid_signals = [s for s in day_signals if s["side"] in ("BUY", "STRONG BUY", "OVERWEIGHT") and s["ticker"] in prices_df.columns]
             
@@ -333,6 +432,9 @@ class BacktestEngine:
                             "side": sig["side"],
                             "confidence": sig["confidence"],
                             "horizon_days": sig["horizon_days"],
+                            "stop_loss": cls._optional_float(sig.get("stop_loss")),
+                            "take_profit": cls._optional_float(sig.get("take_profit")),
+                            "trailing_stop_pct": cls._optional_float(sig.get("trailing_stop_pct")),
                             "shares": shares,
                             "entry_size": position_size,
                             "days_held": 0

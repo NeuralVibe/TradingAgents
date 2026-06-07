@@ -83,6 +83,10 @@ class BacktestTrade(BaseModel):
     side: str
     confidence: float
     horizon_days: int
+    exit_reason: Optional[str] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    trailing_stop_pct: Optional[float] = None
     raw_return: float
     alpha_return: Optional[float] = None
     profit: float
