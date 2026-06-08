@@ -110,7 +110,9 @@ async def stream_run_progress(run_id: str):
     async def event_generator():
         # Create a private queue for this client
         queue = asyncio.Queue()
-        subscribers.append(queue)
+        loop = asyncio.get_running_loop()
+        subscriber = (loop, queue)
+        subscribers.setdefault(run_id, []).append(subscriber)
         
         try:
             # Yield initial connect event
@@ -127,8 +129,11 @@ async def stream_run_progress(run_id: str):
                 
         except asyncio.CancelledError:
             # Handle client disconnect
-            if queue in subscribers:
-                subscribers.remove(queue)
             logger.info(f"SSE client disconnected from run {run_id}")
+        finally:
+            if subscriber in subscribers.get(run_id, []):
+                subscribers[run_id].remove(subscriber)
+            if run_id in subscribers and not subscribers[run_id]:
+                subscribers.pop(run_id, None)
             
     return EventSourceResponse(event_generator())

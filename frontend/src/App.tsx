@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Activity, ShieldAlert, Cpu, LayoutDashboard, LineChart, Settings, X, Newspaper, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { RunForm } from "./components/RunForm";
 import { ChartPanel } from "./components/ChartPanel";
@@ -30,6 +30,14 @@ interface RunResponse {
   recommendation: string;
   created_at: string;
   updated_at: string;
+}
+
+interface TradeSignal {
+  entry_price?: number | null;
+  stop_loss?: number | null;
+  take_profit?: number | null;
+  price_target?: number | null;
+  current_price?: number | null;
 }
 
 // News data structure
@@ -101,7 +109,7 @@ function App() {
   const [llmProvider, setLlmProvider] = useState(() => localStorage.getItem("ta_llm_provider") || "local");
   const [llmModel, setLlmModel] = useState(() => localStorage.getItem("ta_llm_model") || "qwen3.6-27b-uncensored-heretic-v2-native-mtp-preserved");
   const [llmBaseUrl, setLlmBaseUrl] = useState(() => localStorage.getItem("ta_llm_base_url") || "http://localhost:8000/api/v1/chat");
-  const [llmApiKey, setLlmApiKey] = useState(() => localStorage.getItem("ta_llm_api_key") || "lm-studio");
+  const [llmApiKey, setLlmApiKey] = useState("lm-studio");
   const [debateRounds, setDebateRounds] = useState(() => Number(localStorage.getItem("ta_debate_rounds") || "1"));
   const [riskRounds, setRiskRounds] = useState(() => Number(localStorage.getItem("ta_risk_rounds") || "1"));
   const [newsFeed, setNewsFeed] = useState<NewsItem[]>([]);
@@ -473,6 +481,15 @@ function App() {
   // Helper to fetch matching news list for current active ticker
   const activeTicker = activeRun?.ticker || "AAPL";
   const currentNewsFeed = newsFeed;
+  const activeTradeSignal = useMemo<TradeSignal | null>(() => {
+    if (!activeRun?.result) return null;
+    try {
+      const parsed = JSON.parse(activeRun.result) as { trade_signal?: TradeSignal };
+      return parsed.trade_signal || null;
+    } catch {
+      return null;
+    }
+  }, [activeRun?.result]);
 
   const getSentimentIcon = (sentiment: string) => {
     if (sentiment === "BULLISH") return <TrendingUp size={12} color="#00c076" />;
@@ -637,18 +654,7 @@ function App() {
                   indicators={marketIndicators}
                   tradeDate={activeRun?.trade_date}
                   recommendation={activeRun?.recommendation}
-                  decisionText={(() => {
-                    let fullText = activeRun?.decision || "";
-                    if (activeRun?.result) {
-                      try {
-                        const res = JSON.parse(activeRun.result);
-                        if (res.trader_investment_plan) {
-                          fullText += "\n\n" + res.trader_investment_plan;
-                        }
-                      } catch (e) {}
-                    }
-                    return fullText;
-                  })()}
+                  tradeSignal={activeTradeSignal}
                   isExpanded={expandedSection === "chart"}
                   onToggleExpand={() => setExpandedSection(expandedSection === "chart" ? null : "chart")}
                 />
@@ -1037,7 +1043,7 @@ function App() {
                   localStorage.setItem("ta_llm_provider", llmProvider);
                   localStorage.setItem("ta_llm_model", llmModel);
                   localStorage.setItem("ta_llm_base_url", llmBaseUrl);
-                  localStorage.setItem("ta_llm_api_key", llmApiKey);
+                  localStorage.removeItem("ta_llm_api_key");
                   localStorage.setItem("ta_debate_rounds", String(debateRounds));
                   localStorage.setItem("ta_risk_rounds", String(riskRounds));
                   setShowSettingsModal(false);

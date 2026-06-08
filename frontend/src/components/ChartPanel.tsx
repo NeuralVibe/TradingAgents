@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { createChart, CandlestickSeries, LineSeries, HistogramSeries, createSeriesMarkers, LineStyle } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, IPriceLine } from "lightweight-charts";
 import { TrendingUp, Maximize2, Minimize2 } from "lucide-react";
@@ -18,114 +18,47 @@ interface ChartPanelProps {
   indicators: any;
   tradeDate?: string;
   recommendation?: string;
-  decisionText?: string | null;
+  tradeSignal?: TradeSignal | null;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
 }
 
 // 퀀트 리포트 텍스트 내에서 익절/손절/진입 가격을 정밀 파싱하고 Fallback을 적용하는 헬퍼 함수
+interface TradeSignal {
+  entry_price?: number | null;
+  stop_loss?: number | null;
+  take_profit?: number | null;
+  price_target?: number | null;
+  current_price?: number | null;
+}
+
 interface PriceLevels {
   entry: number;
   target: number;
   stopLoss: number;
 }
 
-const parseQuantPriceLevels = (decisionText: string | null | undefined, fallbackPrice: number): PriceLevels => {
-  let entry = fallbackPrice;
-  let target = fallbackPrice * 1.15; // 기본 익절가: +15%
-  let stopLoss = fallbackPrice * 0.95; // 기본 손절가: -5%
-  
-  if (!decisionText) {
-    return { entry, target, stopLoss };
-  }
-  
-  // 가격 정규식 (예: $150.25, 150.25, 150달러, 150,000원 등)
-  const priceRegexGlobal = /(?:\$|₩)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:달러|원)?/gi;
-  const priceRegex = /(?:\$|₩)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:달러|원)?/i;
-  
-  // 50%를 넘는 괴리는 노이즈(예: 베타 2.24, 비중 50%, 8% 등)로 필터링
-  const maxDeviation = 0.5;
-  const isReasonable = (val: number) => {
-    if (isNaN(val) || val <= 0) return false;
-    return Math.abs(val - fallbackPrice) / fallbackPrice <= maxDeviation;
-  };
-
-  const lines = decisionText.split("\n");
-  for (const line of lines) {
-    const lowerLine = line.toLowerCase();
-    
-    // 라인 전체에서 합리적인 가격 후보들을 모두 추출
-    const candidates: number[] = [];
-    const matches = line.matchAll(priceRegexGlobal);
-    for (const m of matches) {
-      const val = parseFloat(m[1].replace(/,/g, ""));
-      if (isReasonable(val)) {
-        candidates.push(val);
-      }
-    }
-
-    if (candidates.length === 0) {
-      const singleMatch = line.match(priceRegex);
-      if (singleMatch) {
-        const val = parseFloat(singleMatch[1].replace(/,/g, ""));
-        if (isReasonable(val)) {
-          candidates.push(val);
-        }
-      }
-    }
-
-    if (candidates.length > 0) {
-      // fallbackPrice와 가장 가까운 최선의 매칭 후보를 기본값으로 설정
-      const bestCandidate = candidates.reduce((prev, curr) => 
-        Math.abs(curr - fallbackPrice) < Math.abs(prev - fallbackPrice) ? curr : prev
-      );
-
-      // 1. 매수진입가 파싱
-      if (lowerLine.includes("매수") || lowerLine.includes("진입") || lowerLine.includes("entry") || lowerLine.includes("구매") || lowerLine.includes("매입")) {
-        entry = bestCandidate;
-      }
-      // 2. 익절목표가 파싱
-      if (lowerLine.includes("목표") || lowerLine.includes("익절") || lowerLine.includes("target") || lowerLine.includes("매도") || lowerLine.includes("tp")) {
-        // 익절은 fallbackPrice보다 큰 값을 선호
-        const targetCandidates = candidates.filter(c => c > fallbackPrice * 0.95);
-        if (targetCandidates.length > 0) {
-          target = targetCandidates.reduce((prev, curr) => 
-            Math.abs(curr - fallbackPrice * 1.15) < Math.abs(prev - fallbackPrice * 1.15) ? curr : prev
-          );
-        } else {
-          target = bestCandidate;
-        }
-      }
-      // 3. 손절라인 파싱
-      if (lowerLine.includes("손절") || lowerLine.includes("stop loss") || lowerLine.includes("stop-loss") || lowerLine.includes("sl")) {
-        // 손절은 fallbackPrice보다 작은 값을 선호
-        const stopCandidates = candidates.filter(c => c < fallbackPrice * 1.05);
-        if (stopCandidates.length > 0) {
-          stopLoss = stopCandidates.reduce((prev, curr) => 
-            Math.abs(curr - fallbackPrice * 0.95) < Math.abs(prev - fallbackPrice * 0.95) ? curr : prev
-          );
-        } else {
-          stopLoss = bestCandidate;
-        }
-      }
-    }
-  }
-  
-  // 합리적 보정: 가격이 너무 터무니없게 잡혔을 경우에 대한 예외 처리
-  if (entry <= 0 || !isReasonable(entry)) entry = fallbackPrice;
-  if (target <= entry || !isReasonable(target)) target = entry * 1.15;
-  if (stopLoss >= entry || !isReasonable(stopLoss)) stopLoss = entry * 0.95;
-  
-  return { entry, target, stopLoss };
+const toPositiveNumber = (value: number | null | undefined): number | null => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
+const getStructuredPriceLevels = (tradeSignal: TradeSignal | null | undefined): PriceLevels | null => {
+  const entry = toPositiveNumber(tradeSignal?.entry_price ?? tradeSignal?.current_price);
+  const target = toPositiveNumber(tradeSignal?.take_profit ?? tradeSignal?.price_target);
+  const stopLoss = toPositiveNumber(tradeSignal?.stop_loss);
+
+  if (entry === null || target === null || stopLoss === null) return null;
+  if (target <= entry || stopLoss >= entry) return null;
+  return { entry, target, stopLoss };
+};
 export const ChartPanel: React.FC<ChartPanelProps> = ({
   ticker,
   data,
   indicators,
   tradeDate,
   recommendation,
-  decisionText,
+  tradeSignal,
   isExpanded = false,
   onToggleExpand,
 }) => {
@@ -384,13 +317,9 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
       }
       priceLinesRef.current = [];
 
-      // 2. 새로운 가격이 들어왔을 때 오버레이 생성
-      if (tradeDate) {
-        const tradePoint = data.find((d) => d.date === tradeDate);
-        const fallbackPrice = tradePoint ? Number(tradePoint.close) : (data[data.length - 1] ? Number(data[data.length - 1].close) : 0);
-        
-        if (fallbackPrice > 0) {
-          const { entry, target, stopLoss } = parseQuantPriceLevels(decisionText, fallbackPrice);
+      const priceLevels = getStructuredPriceLevels(tradeSignal);
+      if (tradeDate && priceLevels) {
+          const { entry, target, stopLoss } = priceLevels;
 
           // (1) 목표 익절가 라인 (Target Price - 초록)
           const targetLine = candleSeriesRef.current.createPriceLine({
@@ -423,14 +352,13 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
           });
 
           priceLinesRef.current = [targetLine, entryLine, stopLossLine];
-        }
       }
     }
 
     // Fit main chart to data
     chart.timeScale().fitContent();
 
-  }, [chart, data, indicators, showSMA50, showSMA200, showEMA10, tradeDate, recommendation, decisionText]);
+  }, [chart, data, indicators, showSMA50, showSMA200, showEMA10, tradeDate, recommendation, tradeSignal]);
 
   // Update RSI / MACD Indicators in the bottom chart
   useEffect(() => {
@@ -631,3 +559,4 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     </div>
   );
 };
+

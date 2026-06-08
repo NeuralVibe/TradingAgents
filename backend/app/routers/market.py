@@ -1,4 +1,5 @@
 import datetime
+import asyncio
 import pandas as pd
 import yfinance as yf
 import requests
@@ -62,7 +63,7 @@ async def get_market_data(
         
         # Fetch stock data
         stock = yf.Ticker(ticker)
-        df = stock.history(start=start_str, end=end_str)
+        df = await asyncio.to_thread(stock.history, start=start_str, end=end_str)
         
         if df.empty:
             raise HTTPException(status_code=404, detail=f"종목 '{ticker}'의 데이터를 찾을 수 없거나 거래 정지 상태입니다.")
@@ -154,7 +155,7 @@ async def get_news_feed(ticker: str):
     ticker_upper = ticker.upper()
     try:
         stock = yf.Ticker(ticker_upper)
-        yf_news = stock.news
+        yf_news = await asyncio.to_thread(lambda: stock.news)
         
         if not yf_news:
             return NewsFeedResponse(
@@ -286,7 +287,7 @@ async def interpret_news(payload: NewsInterpretRequest):
             HumanMessage(content=prompt)
         ]
         
-        response = llm.invoke(messages)
+        response = await asyncio.to_thread(llm.invoke, messages)
         content = response.content
         if content:
             return NewsInterpretResponse(interpretation=content.strip())

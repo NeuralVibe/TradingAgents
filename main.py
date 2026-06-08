@@ -8,12 +8,18 @@ from tradingagents.default_config import DEFAULT_CONFIG
 # want a hard-coded value that should ignore the environment.
 config = DEFAULT_CONFIG.copy()
 
-# Initialize with custom config
-ta = TradingAgentsGraph(debug=True, config=config)
 
-# forward propagate
-_, decision = ta.propagate("NVDA", "2024-05-10")
-print(decision)
+def main():
+    # Initialize with custom config
+    ta = TradingAgentsGraph(debug=True, config=config)
+
+    # forward propagate
+    _, decision = ta.propagate("NVDA", "2024-05-10")
+    print(decision)
+
+
+if __name__ == "__main__":
+    main()
 
 # Memorize mistakes and reflect
 # ta.reflect_and_remember(1000) # parameter is the position returns

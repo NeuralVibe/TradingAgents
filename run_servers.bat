@@ -139,10 +139,16 @@ set /p setup_choice=선택 [1-3] ≫
 if "%setup_choice%"=="1" (
     echo.
     echo [단계 1] Python 가상환경 생성 중...
-    python -m venv .venv
+    where py >nul 2>&1
+    if %errorlevel% equ 0 (
+        py -3 -m venv .venv
+    ) else (
+        python -m venv .venv
+    )
     echo [단계 2] 라이브러리 및 의존성 주입 중 [몇 분 정도 소요될 수 있습니다]...
-    .venv\Scripts\pip install -e .
-    .venv\Scripts\pip install fastapi uvicorn pydantic sqlalchemy
+    .venv\Scripts\python -m pip install --upgrade pip
+    .venv\Scripts\python -m pip install -e .
+    .venv\Scripts\python -m pip install -r backend\requirements.txt pytest
     echo * Python 환경 구축이 완료되었습니다!
     pause
     goto setup_env
@@ -150,7 +156,12 @@ if "%setup_choice%"=="1" (
 if "%setup_choice%"=="2" (
     echo.
     echo [프론트엔드] npm 패키지 설치를 시작합니다...
-    cd frontend && npm install
+    cd frontend
+    if exist package-lock.json (
+        npm ci
+    ) else (
+        npm install
+    )
     cd ..
     echo * 프론트엔드 모듈 설치가 완료되었습니다!
     pause
@@ -238,3 +249,4 @@ if "%FOUND_FRONTEND%"=="1" (
     echo * [프론트엔드] 실행 중인 프론트엔드 서버가 없습니다.
 )
 exit /b
+

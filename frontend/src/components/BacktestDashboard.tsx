@@ -10,7 +10,11 @@ import {
     DollarSign, 
     Percent, 
     FileText, 
-    BarChart3
+    BarChart3,
+    ShieldAlert,
+    SlidersHorizontal,
+    Activity,
+    Target
 } from "lucide-react";
 
 interface BacktestDashboardProps {
@@ -27,7 +31,7 @@ export const BacktestDashboard: React.FC<BacktestDashboardProps> = ({ apiBase })
     const [slippage, setSlippage] = useState(0.0005);
     
     // Sub-view tab
-    const [dashboardTab, setDashboardTab] = useState<"backtest" | "ticker_perf" | "history">("backtest");
+    const [dashboardTab, setDashboardTab] = useState<"backtest" | "validation" | "walk_forward" | "parameter_sweep" | "risk_flags" | "ticker_perf" | "history">("backtest");
 
     // Dynamic data states
     const [backtestResult, setBacktestResult] = useState<any | null>(null);
@@ -38,6 +42,21 @@ export const BacktestDashboard: React.FC<BacktestDashboardProps> = ({ apiBase })
     const [decisionsHistory, setDecisionsHistory] = useState<any[]>([]);
     const [statsLoading, setStatsLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [walkForwardResult, setWalkForwardResult] = useState<any | null>(null);
+    const [walkForwardLoading, setWalkForwardLoading] = useState(false);
+    const [parameterSweepResult, setParameterSweepResult] = useState<any | null>(null);
+    const [parameterSweepLoading, setParameterSweepLoading] = useState(false);
+    const [validationSummary, setValidationSummary] = useState<any | null>(null);
+    const [validationLoading, setValidationLoading] = useState(false);
+    const [trainWindowDays, setTrainWindowDays] = useState(252);
+    const [testWindowDays, setTestWindowDays] = useState(63);
+    const [stepDays, setStepDays] = useState(63);
+    const [minTradesPerWindow, setMinTradesPerWindow] = useState(3);
+    const [sweepMinTrades, setSweepMinTrades] = useState(3);
+    const [validationSizingModes, setValidationSizingModes] = useState<string[]>(["fixed", "confidence"]);
+    const [slippageValuesInput, setSlippageValuesInput] = useState("0,0.0005,0.001");
+    const [riskRewardValuesInput, setRiskRewardValuesInput] = useState("1.0,1.2,1.5");
+    const [priceAttractivenessValuesInput, setPriceAttractivenessValuesInput] = useState("0.25,0.35,0.5");
 
     // Chart ref
     const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -155,16 +174,51 @@ export const BacktestDashboard: React.FC<BacktestDashboardProps> = ({ apiBase })
         }
     };
 
+    const parseTickers = () => (
+        tickersInput
+            .split(",")
+            .map((t) => t.trim().toUpperCase())
+            .filter((t) => t.length > 0)
+    );
+
+    const parseNumberList = (value: string) => (
+        value
+            .split(",")
+            .map((item) => Number(item.trim()))
+            .filter((item) => Number.isFinite(item))
+    );
+
+    const buildValidationPayload = (extra: Record<string, any> = {}) => {
+        const tickers = parseTickers();
+        return {
+            tickers: tickers.length > 0 ? tickers : null,
+            start_date: startDate,
+            end_date: endDate,
+            initial_capital: initialCapital,
+            sizing_modes: validationSizingModes,
+            slippage_values: parseNumberList(slippageValuesInput),
+            min_risk_reward_values: parseNumberList(riskRewardValuesInput),
+            min_price_attractiveness_values: parseNumberList(priceAttractivenessValuesInput),
+            ...extra
+        };
+    };
+
+    const toggleSizingMode = (mode: string) => {
+        setValidationSizingModes((current) => {
+            if (current.includes(mode)) {
+                const next = current.filter((item) => item !== mode);
+                return next.length > 0 ? next : current;
+            }
+            return [...current, mode];
+        });
+    };
+
     const handleRunBacktest = async (e: React.FormEvent) => {
         e.preventDefault();
         setBacktestLoading(true);
         setBacktestResult(null);
 
-        // Process tickers input (comma separated)
-        const tickers = tickersInput
-            .split(",")
-            .map((t) => t.trim().toUpperCase())
-            .filter((t) => t.length > 0);
+        const tickers = parseTickers();
 
         try {
             const response = await fetch(`${apiBase}/performance/backtest`, {
@@ -190,6 +244,86 @@ export const BacktestDashboard: React.FC<BacktestDashboardProps> = ({ apiBase })
             alert(`백테스트 오류: ${err.message}`);
         } finally {
             setBacktestLoading(false);
+        }
+    };
+
+    const handleRunWalkForward = async () => {
+        setWalkForwardLoading(true);
+        setWalkForwardResult(null);
+        try {
+            const response = await fetch(`${apiBase}/performance/walk-forward`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(buildValidationPayload({
+                    train_window_days: trainWindowDays,
+                    test_window_days: testWindowDays,
+                    step_days: stepDays,
+                    min_trades_per_window: minTradesPerWindow
+                }))
+            });
+
+            if (!response.ok) {
+                throw new Error("Walk-forward validation failed.");
+            }
+
+            const data = await response.json();
+            setWalkForwardResult(data);
+        } catch (err: any) {
+            alert(`Walk-forward error: ${err.message}`);
+        } finally {
+            setWalkForwardLoading(false);
+        }
+    };
+
+    const handleRunParameterSweep = async () => {
+        setParameterSweepLoading(true);
+        setParameterSweepResult(null);
+        try {
+            const response = await fetch(`${apiBase}/performance/parameter-sweep`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(buildValidationPayload({
+                    min_trades: sweepMinTrades
+                }))
+            });
+
+            if (!response.ok) {
+                throw new Error("Parameter sweep failed.");
+            }
+
+            const data = await response.json();
+            setParameterSweepResult(data);
+        } catch (err: any) {
+            alert(`Parameter sweep error: ${err.message}`);
+        } finally {
+            setParameterSweepLoading(false);
+        }
+    };
+
+    const loadValidationSummary = async () => {
+        setValidationLoading(true);
+        try {
+            const response = await fetch(`${apiBase}/performance/validation-summary`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(buildValidationPayload({
+                    train_window_days: trainWindowDays,
+                    test_window_days: testWindowDays,
+                    step_days: stepDays,
+                    min_trades_per_window: minTradesPerWindow
+                }))
+            });
+
+            if (!response.ok) {
+                throw new Error("Validation summary failed.");
+            }
+
+            const data = await response.json();
+            setValidationSummary(data);
+        } catch (err: any) {
+            alert(`Validation summary error: ${err.message}`);
+        } finally {
+            setValidationLoading(false);
         }
     };
 
@@ -223,6 +357,49 @@ export const BacktestDashboard: React.FC<BacktestDashboardProps> = ({ apiBase })
         const prefix = val >= 0 ? "+" : "";
         return `${prefix}${(val * 100).toFixed(2)}%`;
     };
+
+    const formatNumber = (val: number | null | undefined, digits = 2) => {
+        if (val === undefined || val === null || Number.isNaN(Number(val))) return "0";
+        return Number(val).toFixed(digits);
+    };
+
+    const renderMetricCard = (label: string, value: string, accent = "var(--text-primary)") => (
+        <div className="card" style={{ margin: 0, padding: "14px", background: "#161a22", border: "1px solid var(--border-color)", borderRadius: "8px" }}>
+            <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>{label}</span>
+            <span style={{ marginTop: "8px", fontSize: "20px", color: accent, fontWeight: 800, fontFamily: "var(--font-mono)" }}>{value}</span>
+        </div>
+    );
+
+    const renderTinyBars = (items: any[], labelKey: string, valueKey: string, color = "var(--accent-blue)") => {
+        const values = items.map((item) => Math.abs(Number(item[valueKey] || 0)));
+        const maxValue = Math.max(...values, 0.0001);
+        return (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {items.slice(0, 12).map((item, index) => {
+                    const value = Number(item[valueKey] || 0);
+                    const width = `${Math.max(3, Math.abs(value) / maxValue * 100)}%`;
+                    return (
+                        <div key={`${item[labelKey]}-${index}`} style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px", gap: "8px", alignItems: "center", fontSize: "11px" }}>
+                            <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item[labelKey]}</span>
+                            <div style={{ height: "8px", background: "#242a36", borderRadius: "4px", overflow: "hidden" }}>
+                                <div style={{ width, height: "100%", background: value >= 0 ? color : "var(--accent-bear)" }} />
+                            </div>
+                            <span style={{ textAlign: "right", fontFamily: "var(--font-mono)", color: value >= 0 ? "var(--accent-bull)" : "var(--accent-bear)" }}>{formatNumber(value, 3)}</span>
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    };
+
+    const riskFlagRows = validationSummary?.risk_flag_details || walkForwardResult?.risk_flag_details || parameterSweepResult?.risk_flag_details || [];
+    const pointInTimeFlags = [
+        "fundamentals_not_point_in_time",
+        "social_data_current_only",
+        "news_timestamp_missing",
+        "llm_parametric_lookahead_risk",
+        "quant_price_setup_unavailable"
+    ];
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px", height: "100%", overflowY: "auto", padding: "8px" }}>
@@ -360,6 +537,38 @@ export const BacktestDashboard: React.FC<BacktestDashboardProps> = ({ apiBase })
                 >
                     <LineChart size={14} />
                     포트폴리오 백테스트 시뮬레이션
+                </button>
+                <button
+                    onClick={() => setDashboardTab("validation")}
+                    className={`tab-btn ${dashboardTab === "validation" ? "active" : ""}`}
+                    style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                    <Activity size={14} />
+                    Validation
+                </button>
+                <button
+                    onClick={() => setDashboardTab("walk_forward")}
+                    className={`tab-btn ${dashboardTab === "walk_forward" ? "active" : ""}`}
+                    style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                    <LineChart size={14} />
+                    Walk-Forward
+                </button>
+                <button
+                    onClick={() => setDashboardTab("parameter_sweep")}
+                    className={`tab-btn ${dashboardTab === "parameter_sweep" ? "active" : ""}`}
+                    style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                    <SlidersHorizontal size={14} />
+                    Parameter Sweep
+                </button>
+                <button
+                    onClick={() => setDashboardTab("risk_flags")}
+                    className={`tab-btn ${dashboardTab === "risk_flags" ? "active" : ""}`}
+                    style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                    <ShieldAlert size={14} />
+                    Risk Flags
                 </button>
                 <button 
                     onClick={() => setDashboardTab("ticker_perf")} 
@@ -571,6 +780,336 @@ export const BacktestDashboard: React.FC<BacktestDashboardProps> = ({ apiBase })
                                     )}
                                 </div>
                             )}
+                        </div>
+                    </div>
+                )}
+
+                {dashboardTab === "validation" && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "16px", overflowY: "auto", flex: 1 }}>
+                        <div className="panel" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: "14px" }}>Validation Overview</h3>
+                                <p style={{ margin: "6px 0 0 0", color: "var(--text-secondary)", fontSize: "12px" }}>
+                                    Combines base backtest, walk-forward windows, parameter sweep, risk flags, and regime breakdown.
+                                </p>
+                            </div>
+                            <button onClick={loadValidationSummary} disabled={validationLoading} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <Activity size={14} />
+                                {validationLoading ? "Loading..." : "Load Validation Summary"}
+                            </button>
+                        </div>
+
+                        {validationSummary ? (
+                            <>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
+                                    {renderMetricCard("Total Windows", String(validationSummary.summary?.total_windows ?? 0), "var(--accent-blue)")}
+                                    {renderMetricCard("Avg Test Return", formatPercent(validationSummary.summary?.average_test_return ?? 0), (validationSummary.summary?.average_test_return ?? 0) >= 0 ? "var(--accent-bull)" : "var(--accent-bear)")}
+                                    {renderMetricCard("Avg Test Sharpe", formatNumber(validationSummary.summary?.average_test_sharpe, 2), "var(--text-primary)")}
+                                    {renderMetricCard("Avg Test MDD", formatPercent(validationSummary.summary?.average_test_mdd ?? 0), "var(--accent-bear)")}
+                                    {renderMetricCard("Stability", formatNumber(validationSummary.summary?.stability_score, 3), "#f3ba2f")}
+                                    {renderMetricCard("Insufficient Windows", String(validationSummary.summary?.insufficient_window_count ?? 0), "var(--accent-hold)")}
+                                </div>
+
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                                    <div className="panel">
+                                        <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>Best Parameter Set</h4>
+                                        <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", color: "var(--text-secondary)" }}>
+                                            {JSON.stringify(validationSummary.best_parameters || {}, null, 2)}
+                                        </pre>
+                                    </div>
+                                    <div className="panel">
+                                        <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>Top Risk Flags</h4>
+                                        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                            {(validationSummary.risk_flag_details || []).slice(0, 8).map((row: any) => (
+                                                <div key={row.flag} style={{ display: "grid", gridTemplateColumns: "1fr 60px", gap: "8px", fontSize: "12px" }}>
+                                                    <span style={{ color: "var(--text-secondary)" }}>{row.flag}</span>
+                                                    <span style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{row.count}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                                    <div className="panel">
+                                        <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>Regime Breakdown</h4>
+                                        <div style={{ overflowX: "auto" }}>
+                                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                                                <thead>
+                                                    <tr style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--border-color)" }}>
+                                                        <th style={{ textAlign: "left", padding: "8px" }}>Regime</th>
+                                                        <th style={{ textAlign: "right", padding: "8px" }}>Signals</th>
+                                                        <th style={{ textAlign: "right", padding: "8px" }}>Trades</th>
+                                                        <th style={{ textAlign: "right", padding: "8px" }}>Avg Return</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {(validationSummary.regime_breakdown || []).map((row: any) => (
+                                                        <tr key={row.regime} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                                                            <td style={{ padding: "8px" }}>{row.regime}</td>
+                                                            <td style={{ padding: "8px", textAlign: "right" }}>{row.signal_count}</td>
+                                                            <td style={{ padding: "8px", textAlign: "right" }}>{row.trade_count}</td>
+                                                            <td style={{ padding: "8px", textAlign: "right", color: row.average_return >= 0 ? "var(--accent-bull)" : "var(--accent-bear)" }}>{formatPercent(row.average_return)}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div className="panel">
+                                        <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>Parameter Score Ranking</h4>
+                                        {renderTinyBars((validationSummary.results || []).slice(0, 10).map((row: any, index: number) => ({
+                                            name: `#${index + 1} RR ${row.parameters?.min_risk_reward}`,
+                                            score: row.score
+                                        })), "name", "score", "var(--accent-blue)")}
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="panel" style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
+                                Run the summary to inspect validation stability, parameter sensitivity, and risk flag concentration.
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {dashboardTab === "walk_forward" && (
+                    <div style={{ display: "grid", gridTemplateColumns: "350px 1fr", gap: "16px", height: "100%", minHeight: 0 }}>
+                        <div className="panel" style={{ overflowY: "auto" }}>
+                            <h3 style={{ fontSize: "14px", borderBottom: "1px solid var(--border-color)", paddingBottom: "10px", marginBottom: "16px" }}>Walk-Forward Settings</h3>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>Train Window Days</label>
+                                <input type="number" value={trainWindowDays} onChange={(e) => setTrainWindowDays(Number(e.target.value))} />
+                                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>Test Window Days</label>
+                                <input type="number" value={testWindowDays} onChange={(e) => setTestWindowDays(Number(e.target.value))} />
+                                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>Step Days</label>
+                                <input type="number" value={stepDays} onChange={(e) => setStepDays(Number(e.target.value))} />
+                                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>Min Trades Per Window</label>
+                                <input type="number" value={minTradesPerWindow} onChange={(e) => setMinTradesPerWindow(Number(e.target.value))} />
+                                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>Sizing Modes</label>
+                                <div style={{ display: "flex", gap: "8px" }}>
+                                    {["fixed", "confidence"].map((mode) => (
+                                        <label key={mode} style={{ display: "flex", gap: "6px", alignItems: "center", fontSize: "12px" }}>
+                                            <input type="checkbox" checked={validationSizingModes.includes(mode)} onChange={() => toggleSizingMode(mode)} />
+                                            {mode}
+                                        </label>
+                                    ))}
+                                </div>
+                                <button onClick={handleRunWalkForward} disabled={walkForwardLoading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+                                    <Play size={14} />
+                                    {walkForwardLoading ? "Running..." : "Run Walk-Forward"}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div style={{ display: "flex", flexDirection: "column", gap: "16px", overflowY: "auto" }}>
+                            {walkForwardResult ? (
+                                <>
+                                    <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "10px" }}>
+                                        {renderMetricCard("Windows", String(walkForwardResult.summary?.total_windows ?? 0), "var(--accent-blue)")}
+                                        {renderMetricCard("Avg Return", formatPercent(walkForwardResult.summary?.average_test_return ?? 0), "var(--accent-bull)")}
+                                        {renderMetricCard("Avg Sharpe", formatNumber(walkForwardResult.summary?.average_test_sharpe, 2), "var(--text-primary)")}
+                                        {renderMetricCard("Avg MDD", formatPercent(walkForwardResult.summary?.average_test_mdd ?? 0), "var(--accent-bear)")}
+                                        {renderMetricCard("Stability", formatNumber(walkForwardResult.summary?.stability_score, 3), "#f3ba2f")}
+                                    </div>
+                                    <div className="panel">
+                                        <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>Test Sharpe by Window</h4>
+                                        {renderTinyBars((walkForwardResult.windows || []).map((window: any) => ({
+                                            window: `W${window.window_index}`,
+                                            sharpe: window.test_summary?.sharpe_ratio ?? 0
+                                        })), "window", "sharpe", "var(--accent-blue)")}
+                                    </div>
+                                    <div className="panel" style={{ overflowX: "auto" }}>
+                                        <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>Window Results</h4>
+                                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                                            <thead>
+                                                <tr style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--border-color)" }}>
+                                                    <th style={{ padding: "8px", textAlign: "left" }}>Window</th>
+                                                    <th style={{ padding: "8px", textAlign: "left" }}>Train</th>
+                                                    <th style={{ padding: "8px", textAlign: "left" }}>Test</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>Return</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>Sharpe</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>MDD</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>Trades</th>
+                                                    <th style={{ padding: "8px", textAlign: "left" }}>Flags</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {(walkForwardResult.windows || []).map((window: any) => (
+                                                    <tr key={window.window_index} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                                                        <td style={{ padding: "8px" }}>W{window.window_index}</td>
+                                                        <td style={{ padding: "8px" }}>{window.train_start} to {window.train_end}</td>
+                                                        <td style={{ padding: "8px" }}>{window.test_start} to {window.test_end}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right", color: (window.test_summary?.cumulative_return ?? 0) >= 0 ? "var(--accent-bull)" : "var(--accent-bear)" }}>{formatPercent(window.test_summary?.cumulative_return ?? 0)}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right" }}>{formatNumber(window.test_summary?.sharpe_ratio, 2)}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right", color: "var(--accent-bear)" }}>{formatPercent(window.test_summary?.max_drawdown ?? 0)}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right" }}>{window.test_trade_count}</td>
+                                                        <td style={{ padding: "8px", color: "var(--text-secondary)" }}>{(window.risk_flags || []).join(", ") || "-"}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="panel" style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
+                                    Configure windows and run walk-forward validation to inspect train/test stability.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {dashboardTab === "parameter_sweep" && (
+                    <div style={{ display: "grid", gridTemplateColumns: "350px 1fr", gap: "16px", height: "100%", minHeight: 0 }}>
+                        <div className="panel" style={{ overflowY: "auto" }}>
+                            <h3 style={{ fontSize: "14px", borderBottom: "1px solid var(--border-color)", paddingBottom: "10px", marginBottom: "16px" }}>Parameter Sweep Settings</h3>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>Sizing Modes</label>
+                                <div style={{ display: "flex", gap: "8px" }}>
+                                    {["fixed", "confidence"].map((mode) => (
+                                        <label key={mode} style={{ display: "flex", gap: "6px", alignItems: "center", fontSize: "12px" }}>
+                                            <input type="checkbox" checked={validationSizingModes.includes(mode)} onChange={() => toggleSizingMode(mode)} />
+                                            {mode}
+                                        </label>
+                                    ))}
+                                </div>
+                                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>Slippage Values</label>
+                                <input value={slippageValuesInput} onChange={(e) => setSlippageValuesInput(e.target.value)} />
+                                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>Min Risk/Reward Values</label>
+                                <input value={riskRewardValuesInput} onChange={(e) => setRiskRewardValuesInput(e.target.value)} />
+                                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>Min Price Attractiveness Values</label>
+                                <input value={priceAttractivenessValuesInput} onChange={(e) => setPriceAttractivenessValuesInput(e.target.value)} />
+                                <label style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>Min Trades</label>
+                                <input type="number" value={sweepMinTrades} onChange={(e) => setSweepMinTrades(Number(e.target.value))} />
+                                <button onClick={handleRunParameterSweep} disabled={parameterSweepLoading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+                                    <Target size={14} />
+                                    {parameterSweepLoading ? "Running..." : "Run Parameter Sweep"}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div style={{ display: "flex", flexDirection: "column", gap: "16px", overflowY: "auto" }}>
+                            {parameterSweepResult ? (
+                                <>
+                                    <div className="panel">
+                                        <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>Best Parameter</h4>
+                                        <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", color: "var(--text-secondary)" }}>
+                                            {JSON.stringify(parameterSweepResult.best_parameters || {}, null, 2)}
+                                        </pre>
+                                    </div>
+                                    <div className="panel">
+                                        <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>Score Ranking</h4>
+                                        {renderTinyBars((parameterSweepResult.results || []).slice(0, 12).map((row: any, index: number) => ({
+                                            name: `#${index + 1} ${row.parameters?.sizing_mode} RR ${row.parameters?.min_risk_reward}`,
+                                            score: row.score
+                                        })), "name", "score", "var(--accent-blue)")}
+                                    </div>
+                                    <div className="panel" style={{ overflowX: "auto" }}>
+                                        <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>Sweep Results</h4>
+                                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                                            <thead>
+                                                <tr style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--border-color)" }}>
+                                                    <th style={{ padding: "8px", textAlign: "left" }}>Sizing</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>Slippage</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>Min RR</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>Min Price</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>Score</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>Sharpe</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>MDD</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>Return</th>
+                                                    <th style={{ padding: "8px", textAlign: "right" }}>Trades</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {(parameterSweepResult.results || []).map((row: any, index: number) => (
+                                                    <tr key={index} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                                                        <td style={{ padding: "8px" }}>{row.parameters?.sizing_mode}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right" }}>{formatNumber(row.parameters?.slippage, 4)}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right" }}>{formatNumber(row.parameters?.min_risk_reward, 2)}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right" }}>{formatNumber(row.parameters?.min_price_attractiveness, 2)}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right", fontWeight: 700 }}>{formatNumber(row.score, 4)}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right" }}>{formatNumber(row.summary?.sharpe_ratio, 2)}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right", color: "var(--accent-bear)" }}>{formatPercent(row.summary?.max_drawdown ?? 0)}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right", color: (row.summary?.cumulative_return ?? 0) >= 0 ? "var(--accent-bull)" : "var(--accent-bear)" }}>{formatPercent(row.summary?.cumulative_return ?? 0)}</td>
+                                                        <td style={{ padding: "8px", textAlign: "right" }}>{row.trade_count}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="panel" style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
+                                    Run a parameter sweep to compare sizing, slippage, risk/reward, and price attractiveness thresholds.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {dashboardTab === "risk_flags" && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "16px", overflowY: "auto", flex: 1 }}>
+                        <div className="panel" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: "14px" }}>Risk Flags</h3>
+                                <p style={{ margin: "6px 0 0 0", color: "var(--text-secondary)", fontSize: "12px" }}>
+                                    Aggregates signal quality, point-in-time, and validation filter flags.
+                                </p>
+                            </div>
+                            <button onClick={loadValidationSummary} disabled={validationLoading} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <ShieldAlert size={14} />
+                                {validationLoading ? "Loading..." : "Refresh Risk Flags"}
+                            </button>
+                        </div>
+
+                        <div className="panel">
+                            <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>Point-in-Time Watchlist</h4>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "8px" }}>
+                                {pointInTimeFlags.map((flag) => {
+                                    const row = riskFlagRows.find((item: any) => item.flag === flag);
+                                    return (
+                                        <div key={flag} style={{ display: "flex", justifyContent: "space-between", padding: "10px", background: "#161a22", border: "1px solid var(--border-color)", borderRadius: "6px", fontSize: "12px" }}>
+                                            <span style={{ color: "var(--text-secondary)" }}>{flag}</span>
+                                            <span style={{ fontFamily: "var(--font-mono)", color: (row?.count || 0) > 0 ? "var(--accent-bear)" : "var(--text-secondary)" }}>{row?.count || 0}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="panel" style={{ overflowX: "auto" }}>
+                            <h4 style={{ margin: "0 0 12px 0", fontSize: "13px" }}>All Risk Flags</h4>
+                            <p style={{ margin: "0 0 12px 0", color: "var(--text-secondary)", fontSize: "11px" }}>
+                                Flag Events counts signals or validation filters where the flag appeared. Real Trades counts completed backtest trades that came from a flagged source signal.
+                            </p>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                                <thead>
+                                    <tr style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--border-color)" }}>
+                                        <th style={{ padding: "8px", textAlign: "left" }}>Flag</th>
+                                        <th style={{ padding: "8px", textAlign: "right" }}>Flag Events</th>
+                                        <th style={{ padding: "8px", textAlign: "right" }}>Real Trades</th>
+                                        <th style={{ padding: "8px", textAlign: "right" }}>Affected Tickers</th>
+                                        <th style={{ padding: "8px", textAlign: "left" }}>Example</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {riskFlagRows.map((row: any) => (
+                                        <tr key={row.flag} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                                            <td style={{ padding: "8px", color: row.count > 0 ? "var(--accent-hold)" : "var(--text-secondary)" }}>{row.flag}</td>
+                                            <td style={{ padding: "8px", textAlign: "right", fontFamily: "var(--font-mono)" }}>{row.count}</td>
+                                            <td style={{ padding: "8px", textAlign: "right" }}>{row.affected_trade_count}</td>
+                                            <td style={{ padding: "8px", textAlign: "right" }}>{row.affected_ticker_count}</td>
+                                            <td style={{ padding: "8px", color: "var(--text-secondary)" }}>{row.example_ticker ? `${row.example_ticker} / ${row.example_date}` : "-"}</td>
+                                        </tr>
+                                    ))}
+                                    {riskFlagRows.length === 0 && (
+                                        <tr>
+                                            <td colSpan={5} style={{ textAlign: "center", padding: "20px", color: "var(--text-secondary)" }}>Load validation summary to inspect risk flags.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 )}

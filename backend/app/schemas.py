@@ -103,10 +103,18 @@ class BacktestEquityPoint(BaseModel):
 class BacktestSummary(BaseModel):
     cumulative_return: float
     annualized_return: float
+    cagr: float
     sharpe_ratio: float
+    sortino_ratio: float
+    calmar_ratio: float
     max_drawdown: float
     win_rate: float
     profit_factor: float
+    average_win: float
+    average_loss: float
+    payoff_ratio: float
+    turnover: float
+    exposure: float
     total_trades: int
     winning_trades: int
     losing_trades: int
@@ -119,6 +127,79 @@ class BacktestResponse(BaseModel):
     summary: BacktestSummary
     equity_curve: List[BacktestEquityPoint]
     trades: List[BacktestTrade]
+
+
+class ParameterSweepRequest(BaseModel):
+    tickers: Optional[List[str]] = Field(default=None, description="List of tickers to validate. If empty/None, runs all available tickers.")
+    start_date: str = Field(..., description="Start date (YYYY-MM-DD)")
+    end_date: str = Field(..., description="End date (YYYY-MM-DD)")
+    initial_capital: float = Field(100000.0, description="Initial capital in USD")
+    sizing_modes: List[str] = Field(default_factory=lambda: ["fixed", "confidence"])
+    slippage_values: List[float] = Field(default_factory=lambda: [0.0, 0.0005, 0.001])
+    min_risk_reward_values: List[float] = Field(default_factory=lambda: [1.0, 1.2, 1.5])
+    min_price_attractiveness_values: List[float] = Field(default_factory=lambda: [0.25, 0.35, 0.5])
+    min_trades: int = Field(3, ge=0)
+
+
+class WalkForwardRequest(BaseModel):
+    tickers: Optional[List[str]] = Field(default=None, description="List of tickers to validate. If empty/None, runs all available tickers.")
+    start_date: str = Field(..., description="Start date (YYYY-MM-DD)")
+    end_date: str = Field(..., description="End date (YYYY-MM-DD)")
+    initial_capital: float = Field(100000.0, description="Initial capital in USD")
+    train_window_days: int = Field(252, ge=1)
+    test_window_days: int = Field(63, ge=1)
+    step_days: int = Field(63, ge=1)
+    min_trades_per_window: int = Field(3, ge=0)
+    sizing_modes: List[str] = Field(default_factory=lambda: ["fixed", "confidence"])
+    slippage_values: List[float] = Field(default_factory=lambda: [0.0, 0.0005, 0.001])
+    min_risk_reward_values: List[float] = Field(default_factory=lambda: [1.0, 1.2, 1.5])
+    min_price_attractiveness_values: List[float] = Field(default_factory=lambda: [0.25, 0.35, 0.5])
+
+
+class ValidationSummaryRequest(WalkForwardRequest):
+    pass
+
+
+class ParameterSweepResponse(BaseModel):
+    best_parameters: Optional[Dict[str, Any]] = None
+    best_summary: Optional[Dict[str, Any]] = None
+    results: List[Dict[str, Any]]
+    windows: List[Dict[str, Any]]
+    risk_flag_counts: Dict[str, int]
+    risk_flag_details: List[Dict[str, Any]]
+    regime_breakdown: List[Dict[str, Any]]
+    ticker_breakdown: List[Dict[str, Any]]
+    period_breakdown: List[Dict[str, Any]]
+    calculation_basis: Dict[str, Any]
+
+
+class WalkForwardResponse(BaseModel):
+    best_parameters: Optional[Dict[str, Any]] = None
+    best_summary: Optional[Dict[str, Any]] = None
+    summary: Dict[str, Any]
+    results: List[Dict[str, Any]]
+    windows: List[Dict[str, Any]]
+    risk_flag_counts: Dict[str, int]
+    risk_flag_details: List[Dict[str, Any]]
+    regime_breakdown: List[Dict[str, Any]]
+    ticker_breakdown: List[Dict[str, Any]]
+    period_breakdown: List[Dict[str, Any]]
+    calculation_basis: Dict[str, Any]
+
+
+class ValidationSummaryResponse(BaseModel):
+    base_summary: Dict[str, Any]
+    best_parameters: Optional[Dict[str, Any]] = None
+    best_summary: Optional[Dict[str, Any]] = None
+    summary: Dict[str, Any]
+    results: List[Dict[str, Any]]
+    windows: List[Dict[str, Any]]
+    risk_flag_counts: Dict[str, int]
+    risk_flag_details: List[Dict[str, Any]]
+    regime_breakdown: List[Dict[str, Any]]
+    ticker_breakdown: List[Dict[str, Any]]
+    period_breakdown: List[Dict[str, Any]]
+    calculation_basis: Dict[str, Any]
 
 
 class NewsItem(BaseModel):

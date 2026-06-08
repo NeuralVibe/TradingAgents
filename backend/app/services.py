@@ -3,7 +3,8 @@ import json
 import uuid
 import logging
 import datetime
-from typing import Dict, Any, Callable, List
+import threading
+from typing import Dict, Any, Callable, List, Tuple
 from sqlalchemy.orm import Session
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
@@ -15,8 +16,11 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-# SSE Event Subscribers list
-subscribers: List[asyncio.Queue] = []
+# SSE subscribers grouped by run_id. Each queue is paired with the event
+# loop that owns it so graph callbacks running in worker threads can publish
+# safely via call_soon_threadsafe.
+Subscriber = Tuple[asyncio.AbstractEventLoop, asyncio.Queue]
+subscribers: Dict[str, List[Subscriber]] = {}
 
 def parse_recommendation(decision_text: str) -> str:
     """Parse final decision text to extract BUY, STRONG BUY, OVERWEIGHT, SELL, UNDERWEIGHT, or HOLD recommendation."""
@@ -147,6 +151,8 @@ class SimulationService:
         if not run:
             db.close()
             return
+        owner_loop = asyncio.get_running_loop()
+        owner_thread_id = threading.get_ident()
             
         # Update to RUNNING
         run.status = "RUNNING"
@@ -156,6 +162,17 @@ class SimulationService:
         
         # Helper to push log and broadcast SSE event
         def log_and_broadcast(step: str, message: str, progress: float, log_type: str = "INFO", details: Any = None):
+            if threading.get_ident() != owner_thread_id:
+                owner_loop.call_soon_threadsafe(
+                    log_and_broadcast,
+                    step,
+                    message,
+                    progress,
+                    log_type,
+                    details,
+                )
+                return
+
             nonlocal run
             clamped_progress = min(100.0, max(0.0, progress))
             
@@ -371,6 +388,7 @@ class SimulationService:
             final_decision_str = final_state.get("final_trade_decision", "")
             run.decision = final_decision_str
             run.recommendation = parse_recommendation(final_decision_str)
+            saved_sig_data = None
             
             # Extract standard signal and write to decisions table
             try:
@@ -379,6 +397,25 @@ class SimulationService:
                     date=trade_date,
                     decision_text=final_decision_str
                 )
+                try:
+                    from tradingagents.dataflows.stockstats_utils import load_ohlcv
+                    from tradingagents.quant.price_evaluation import evaluate_price_setup
+
+                    ohlcv = load_ohlcv(ticker, trade_date)
+                    price_setup = evaluate_price_setup(ohlcv)
+                    sig_data = SignalExtractor.enrich_with_price_setup(sig_data, price_setup)
+                    sig_data = SignalExtractor.apply_signal_gate(sig_data)
+                    run.recommendation = sig_data["side"]
+                except Exception as quant_err:
+                    logger.warning(f"Deterministic price setup unavailable for {ticker} on {trade_date}: {quant_err}")
+                    sig_data["risk_flags"] = SignalExtractor._merge_unique(
+                        sig_data.get("risk_flags"),
+                        ["quant_price_setup_unavailable"],
+                    )
+                    sig_data["calculation_basis"] = {
+                        **SignalExtractor._coerce_dict(sig_data.get("calculation_basis")),
+                        "quant_price_setup_error": str(quant_err),
+                    }
                 
                 # Check if decision already exists for ticker + date to avoid duplicates
                 existing_decision = db.query(Decision).filter(
@@ -395,11 +432,15 @@ class SimulationService:
                         confidence=sig_data["confidence"],
                         horizon_days=sig_data["horizon_days"],
                         price_target=sig_data["price_target"],
-                        raw_json=json.dumps(final_state.get("final_trade_decision", ""))
+                        raw_json=json.dumps({
+                            "decision_text": final_state.get("final_trade_decision", ""),
+                            "trade_signal": sig_data,
+                        })
                     )
                     db.add(new_decision)
                     db.commit()
                     logger.info(f"Saved extracted signal to decisions table for {ticker} on {trade_date}")
+                saved_sig_data = sig_data
             except Exception as sig_err:
                 logger.error(f"Failed to extract and save standard signal to decisions table: {str(sig_err)}")
 
@@ -412,6 +453,8 @@ class SimulationService:
                         "final_trade_decision"]:
                 if key in final_state:
                     serializable_state[key] = final_state[key]
+            if saved_sig_data is not None:
+                serializable_state["trade_signal"] = saved_sig_data
                     
             run.result = json.dumps(serializable_state)
             
@@ -485,15 +528,24 @@ class SimulationService:
         finally:
             db.close()
 
-# Helper to push a message into all SSE subscription queues
+# Helper to push a message into SSE subscription queues for the matching run.
 def broadcast_event(event_type: str, data: Dict[str, Any]):
-    payload = f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
-    for subscriber in list(subscribers):
+    run_id = data.get("run_id")
+    if not run_id:
+        return
+
+    payload = {"event": event_type, "data": json.dumps(data)}
+    for loop, queue in list(subscribers.get(run_id, [])):
         try:
-            subscriber.put_nowait(payload)
+            if loop.is_closed():
+                subscribers[run_id].remove((loop, queue))
+                continue
+            loop.call_soon_threadsafe(queue.put_nowait, payload)
         except Exception:
             # If subscriber queue is closed or full, remove it
-            if subscriber in subscribers:
-                subscribers.remove(subscriber)
+            if (loop, queue) in subscribers.get(run_id, []):
+                subscribers[run_id].remove((loop, queue))
+    if run_id in subscribers and not subscribers[run_id]:
+        subscribers.pop(run_id, None)
 
 simulation_service = SimulationService()

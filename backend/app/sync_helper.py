@@ -49,10 +49,15 @@ def sync_markdown_log_to_db(db: Session) -> dict:
             date = entry["date"]
             
             # Extract standard values
-            side = SignalExtractor.parse_recommendation(entry["decision"])
-            confidence = SignalExtractor.extract_confidence(entry["decision"], side)
-            horizon_days = SignalExtractor.extract_horizon_days(entry["decision"])
-            price_target = SignalExtractor.extract_price_target(entry["decision"])
+            sig_data = SignalExtractor.parse_decision_to_signal(
+                ticker=ticker,
+                date=date,
+                decision_text=entry["decision"],
+            )
+            side = sig_data["side"]
+            confidence = sig_data["confidence"]
+            horizon_days = sig_data["horizon_days"]
+            price_target = sig_data["price_target"]
             
             # Outcomes
             realized_return = None
@@ -76,7 +81,10 @@ def sync_markdown_log_to_db(db: Session) -> dict:
                     db_entry.realized_alpha = realized_alpha
                     db_entry.horizon_days = horizon_days
                     db_entry.reflection = entry.get("reflection")
-                    db_entry.raw_json = json.dumps(entry.get("decision"))
+                    db_entry.raw_json = json.dumps({
+                        "decision_text": entry.get("decision"),
+                        "trade_signal": sig_data,
+                    })
                     db.commit()
                     updated_count += 1
             else:
@@ -91,7 +99,10 @@ def sync_markdown_log_to_db(db: Session) -> dict:
                     realized_return=realized_return,
                     realized_alpha=realized_alpha,
                     reflection=entry.get("reflection"),
-                    raw_json=json.dumps(entry.get("decision"))
+                    raw_json=json.dumps({
+                        "decision_text": entry.get("decision"),
+                        "trade_signal": sig_data,
+                    })
                 )
                 db.add(new_dec)
                 db.commit()

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import numpy as np
 import pandas as pd
@@ -55,6 +57,167 @@ def test_signal_extractor_parse_decision_to_signal():
     assert sig["confidence"] == 0.90
     assert sig["horizon_days"] == 10
     assert sig["price_target"] == 175.25
+
+
+def test_signal_extractor_parse_structured_signal_preserves_backtest_fields():
+    """Structured TradeSignal-like payloads should keep quantitative fields intact."""
+    payload = {
+        "ticker": "aapl",
+        "as_of_date": "2026-05-25",
+        "action": "BUY",
+        "confidence": "0.82",
+        "expected_holding_days": "7",
+        "entry_price": "101.5",
+        "entry_zone_low": 100.0,
+        "entry_zone_high": 102.0,
+        "stop_loss": 96.0,
+        "take_profit": 113.0,
+        "trailing_stop_pct": 0.05,
+        "risk_reward_ratio": 2.35,
+        "position_size_pct": 0.12,
+        "signal_quality_score": 0.71,
+        "trend_score": 0.64,
+        "volatility_regime": "normal",
+        "evidence": "ATR support",
+        "risk_flags": ["resistance_caps_target"],
+        "calculation_basis": {"selected_stop_method": "atr_stop"},
+    }
+
+    sig = SignalExtractor.parse_decision_to_signal("MSFT", "2026-05-01", json.dumps(payload))
+
+    assert "action" not in sig
+    assert sig["source"] == "structured"
+    assert sig["ticker"] == "AAPL"
+    assert sig["date"] == "2026-05-25"
+    assert sig["side"] == "BUY"
+    assert sig["confidence"] == 0.82
+    assert sig["horizon_days"] == 7
+    assert sig["price_target"] == 113.0
+    assert sig["entry_price"] == 101.5
+    assert sig["stop_loss"] == 96.0
+    assert sig["take_profit"] == 113.0
+    assert sig["risk_reward_ratio"] == 2.35
+    assert sig["position_size_pct"] == 0.12
+    assert sig["evidence"] == ["ATR support"]
+    assert sig["risk_flags"] == ["resistance_caps_target"]
+    assert sig["calculation_basis"]["selected_stop_method"] == "atr_stop"
+
+
+def test_signal_extractor_parse_model_dump_decision_object():
+    """Pydantic-like decisions should normalize into backtest signals."""
+
+    class DummyDecision:
+        def model_dump(self, mode=None):
+            return {
+                "rating": "Overweight",
+                "executive_summary": "Add selectively.",
+                "investment_thesis": "Analyst evidence is constructive.",
+                "price_target": 205.5,
+                "time_horizon": "2 weeks",
+            }
+
+    decision = DummyDecision()
+
+    sig = SignalExtractor.parse_decision_to_signal("AAPL", "2026-05-25", decision)
+
+    assert sig["source"] == "structured"
+    assert sig["ticker"] == "AAPL"
+    assert sig["date"] == "2026-05-25"
+    assert sig["side"] == "OVERWEIGHT"
+    assert sig["horizon_days"] == 10
+    assert sig["price_target"] == 205.5
+
+
+def test_signal_extractor_stored_decision_prefers_structured_raw_json():
+    """Backtests should prefer structured raw_json fields over legacy DB columns."""
+    raw_json = json.dumps(
+        {
+            "decision_text": "**Rating**: Hold",
+            "trade_signal": {
+                "ticker": "AAPL",
+                "as_of_date": "2026-05-25",
+                "action": "BUY",
+                "confidence": 0.72,
+                "expected_holding_days": 8,
+                "stop_loss": 95.0,
+                "take_profit": 112.0,
+                "risk_flags": ["structured_source"],
+            },
+        }
+    )
+
+    sig = SignalExtractor.parse_stored_decision_to_signal(
+        ticker="AAPL",
+        date="2026-05-25",
+        side="HOLD",
+        confidence=0.5,
+        horizon_days=5,
+        price_target=None,
+        raw_json=raw_json,
+    )
+
+    assert sig["source"] == "structured"
+    assert sig["side"] == "BUY"
+    assert sig["confidence"] == 0.72
+    assert sig["horizon_days"] == 8
+    assert sig["price_target"] == 112.0
+    assert sig["stop_loss"] == 95.0
+    assert sig["take_profit"] == 112.0
+    assert sig["risk_flags"] == ["structured_source"]
+
+
+def test_signal_extractor_stored_decision_falls_back_to_db_columns_for_legacy_raw_json():
+    """Legacy raw text should not break DB-column based backtest signals."""
+    sig = SignalExtractor.parse_stored_decision_to_signal(
+        ticker="AAPL",
+        date="2026-05-25",
+        side="OVERWEIGHT",
+        confidence=0.65,
+        horizon_days=6,
+        price_target=180.0,
+        raw_json=json.dumps("**Rating**: Buy"),
+    )
+
+    assert sig["source"] == "db_columns"
+    assert sig["side"] == "OVERWEIGHT"
+    assert sig["confidence"] == 0.65
+    assert sig["horizon_days"] == 6
+    assert sig["price_target"] == 180.0
+    assert sig["stop_loss"] is None
+    assert sig["take_profit"] is None
+
+
+def test_signal_extractor_handles_invalid_structured_types_safely():
+    """Malformed structured values should use fallbacks instead of raising."""
+    raw_json = json.dumps(
+        {
+            "trade_signal": {
+                "action": "STRONG_BUY",
+                "confidence": "not-a-number",
+                "expected_holding_days": "not-an-int",
+                "risk_flags": "single_flag",
+                "calculation_basis": ["not", "a", "dict"],
+            }
+        }
+    )
+
+    sig = SignalExtractor.parse_stored_decision_to_signal(
+        ticker="AAPL",
+        date="2026-05-25",
+        side="HOLD",
+        confidence=None,
+        horizon_days=None,
+        price_target=None,
+        raw_json=raw_json,
+    )
+
+    assert sig["source"] == "structured"
+    assert sig["side"] == "STRONG BUY"
+    assert sig["confidence"] == 0.5
+    assert sig["horizon_days"] == 5
+    assert sig["risk_flags"] == ["single_flag"]
+    assert sig["calculation_basis"] == {}
+
 
 def test_backtest_engine_summary_math():
     """Verify the metrics math matches theoretical expectations under controlled inputs."""
@@ -389,3 +552,137 @@ def test_backtest_preserves_horizon_exit_without_stop_or_take_profit(monkeypatch
     assert trade["exit_date"] == "2026-05-05"
     assert trade["exit_reason"] == "horizon"
     assert trade["exit_price"] == 102.0
+
+
+def test_backtest_exits_on_trailing_stop(monkeypatch):
+    close_prices = _close_prices()
+    ohlc_prices = _ohlc_prices(
+        highs=[100.0, 101.0, 110.0, 106.0, 110.0],
+        lows=[98.0, 99.0, 99.0, 104.0, 108.0],
+    )
+    _patch_backtest_history(monkeypatch, close_prices, ohlc_prices)
+
+    result = BacktestEngine.run_portfolio_backtest(
+        signals=[_buy_signal(trailing_stop_pct=0.05, horizon_days=5)],
+        start_date="2026-05-01",
+        end_date="2026-05-07",
+        initial_capital=100000.0,
+        slippage=0.0,
+    )
+
+    trade = result["trades"][0]
+    assert trade["entry_date"] == "2026-05-04"
+    assert trade["exit_date"] == "2026-05-06"
+    assert trade["exit_reason"] == "trailing_stop"
+    assert trade["exit_price"] == 104.5
+
+
+def test_backtest_sell_signal_exits_existing_long_without_shorting(monkeypatch):
+    close_prices = _close_prices()
+    _patch_backtest_history(monkeypatch, close_prices)
+
+    result = BacktestEngine.run_portfolio_backtest(
+        signals=[
+            _buy_signal(horizon_days=5),
+            _buy_signal(date="2026-05-04", side="SELL"),
+        ],
+        start_date="2026-05-01",
+        end_date="2026-05-07",
+        initial_capital=100000.0,
+        slippage=0.0,
+    )
+
+    assert len(result["trades"]) == 1
+    trade = result["trades"][0]
+    assert trade["entry_date"] == "2026-05-04"
+    assert trade["exit_date"] == "2026-05-05"
+    assert trade["exit_reason"] == "sell_signal"
+    assert trade["exit_price"] == 102.0
+
+
+def test_backtest_uses_structured_position_size_pct_before_confidence(monkeypatch):
+    close_prices = _close_prices()
+    _patch_backtest_history(monkeypatch, close_prices)
+
+    result = BacktestEngine.run_portfolio_backtest(
+        signals=[_buy_signal(horizon_days=1, confidence=1.0, position_size_pct=0.05)],
+        start_date="2026-05-01",
+        end_date="2026-05-07",
+        initial_capital=100000.0,
+        sizing_mode="confidence",
+        slippage=0.0,
+    )
+
+    assert result["trades"][0]["size"] == 5000.0
+
+
+def test_backtest_summary_includes_extended_risk_metrics():
+    equity_curve = [
+        {"date": "2026-05-01", "portfolio_value": 100000.0, "cash": 90000.0, "benchmark_value": 400.0},
+        {"date": "2026-05-02", "portfolio_value": 101000.0, "cash": 91000.0, "benchmark_value": 402.0},
+        {"date": "2026-05-03", "portfolio_value": 99000.0, "cash": 89000.0, "benchmark_value": 401.0},
+    ]
+    trades = [{"ticker": "AAPL", "profit": 1000.0, "size": 10000.0}]
+    prices_df = pd.DataFrame(
+        {"SPY": [400.0, 402.0, 401.0]},
+        index=pd.to_datetime(["2026-05-01", "2026-05-02", "2026-05-03"]),
+    )
+
+    summary = BacktestEngine._calculate_backtest_summary(
+        equity_curve=equity_curve,
+        trades=trades,
+        prices_df=prices_df,
+        benchmark="SPY",
+        trading_dates=prices_df.index,
+    )
+
+    for key in [
+        "cagr",
+        "sortino_ratio",
+        "calmar_ratio",
+        "average_win",
+        "average_loss",
+        "payoff_ratio",
+        "turnover",
+        "exposure",
+    ]:
+        assert key in summary
+
+
+def test_signal_gate_blocks_buy_when_quant_levels_are_invalid():
+    signal = SignalExtractor.apply_signal_gate(
+        {
+            "ticker": "AAPL",
+            "date": "2026-05-01",
+            "side": "BUY",
+            "confidence": 0.9,
+            "stop_loss": None,
+            "take_profit": None,
+            "risk_reward_ratio": None,
+            "risk_flags": ["invalid_stop_loss"],
+            "calculation_basis": {},
+        }
+    )
+
+    assert signal["side"] == "HOLD"
+    assert "signal_gate_missing_valid_levels" in signal["risk_flags"]
+
+
+def test_signal_gate_waits_for_pullback_near_resistance():
+    signal = SignalExtractor.apply_signal_gate(
+        {
+            "ticker": "AAPL",
+            "date": "2026-05-01",
+            "side": "BUY",
+            "confidence": 0.9,
+            "stop_loss": 95.0,
+            "take_profit": 110.0,
+            "risk_reward_ratio": 2.0,
+            "price_attractiveness_score": 0.2,
+            "risk_flags": ["near_resistance"],
+            "calculation_basis": {},
+        }
+    )
+
+    assert signal["side"] == "WAIT_FOR_PULLBACK"
+    assert "signal_gate_price_unattractive" in signal["risk_flags"]

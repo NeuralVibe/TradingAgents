@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from starlette.responses import StreamingResponse
 
 from ..database import get_db
@@ -14,9 +14,16 @@ from ..schemas import (
     BacktestResponse, 
     BacktestSummary,
     BacktestEquityPoint,
-    BacktestTrade
+    BacktestTrade,
+    ParameterSweepRequest,
+    ParameterSweepResponse,
+    ValidationSummaryRequest,
+    ValidationSummaryResponse,
+    WalkForwardRequest,
+    WalkForwardResponse,
 )
-from ..quant_engine import BacktestEngine
+from ..quant_engine import BacktestEngine, SignalExtractor
+from ..validation_engine import ValidationEngine
 from ..sync_helper import sync_markdown_log_to_db, update_outcomes_for_pending_decisions
 
 logger = logging.getLogger(__name__)
@@ -24,35 +31,48 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/performance", tags=["performance"])
 
 
+def _load_backtest_signals(
+    db: Session,
+    tickers: Optional[List[str]],
+    start_date: str,
+    end_date: str,
+) -> List[Dict[str, Any]]:
+    """Load stored decisions and normalize them into backtest-ready signals."""
+    query = db.query(Decision)
+
+    if tickers and len(tickers) > 0:
+        tickers_upper = [t.upper() for t in tickers]
+        query = query.filter(Decision.ticker.in_(tickers_upper))
+
+    query = query.filter(
+        Decision.decision_date >= start_date,
+        Decision.decision_date <= end_date,
+    )
+
+    decisions = query.order_by(Decision.decision_date.asc()).all()
+    return [
+        SignalExtractor.parse_stored_decision_to_signal(
+            ticker=d.ticker,
+            date=d.decision_date,
+            side=d.side,
+            confidence=d.confidence,
+            horizon_days=d.horizon_days,
+            price_target=d.price_target,
+            raw_json=d.raw_json,
+        )
+        for d in decisions
+    ]
+
+
 @router.post("/backtest", response_model=BacktestResponse)
 def run_backtest(payload: BacktestRequest, db: Session = Depends(get_db)):
     """Run a chronological vector portfolio backtest based on historical agent decisions stored in the database."""
-    # Build query filter
-    query = db.query(Decision)
-    
-    if payload.tickers and len(payload.tickers) > 0:
-        tickers_upper = [t.upper() for t in payload.tickers]
-        query = query.filter(Decision.ticker.in_(tickers_upper))
-        
-    query = query.filter(
-        Decision.decision_date >= payload.start_date,
-        Decision.decision_date <= payload.end_date
+    signals = _load_backtest_signals(
+        db=db,
+        tickers=payload.tickers,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
     )
-    
-    # Sort chronologically
-    decisions = query.order_by(Decision.decision_date.asc()).all()
-    
-    # Map to standard signal dictionaries
-    signals = []
-    for d in decisions:
-        signals.append({
-            "ticker": d.ticker,
-            "date": d.decision_date,
-            "side": d.side,
-            "confidence": d.confidence,
-            "horizon_days": d.horizon_days,
-            "price_target": d.price_target
-        })
         
     # Execute backtest simulation
     result = BacktestEngine.run_portfolio_backtest(
@@ -73,6 +93,78 @@ def run_backtest(payload: BacktestRequest, db: Session = Depends(get_db)):
         summary=summary_data,
         equity_curve=eq_curve,
         trades=trades_list
+    )
+
+
+@router.post("/walk-forward", response_model=WalkForwardResponse)
+def run_walk_forward(payload: WalkForwardRequest, db: Session = Depends(get_db)):
+    """Run walk-forward validation over stored structured or legacy decision signals."""
+    signals = _load_backtest_signals(
+        db=db,
+        tickers=payload.tickers,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    return ValidationEngine.run_walk_forward_validation(
+        signals=signals,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        initial_capital=payload.initial_capital,
+        train_window_days=payload.train_window_days,
+        test_window_days=payload.test_window_days,
+        step_days=payload.step_days,
+        min_trades_per_window=payload.min_trades_per_window,
+        sizing_modes=payload.sizing_modes,
+        slippage_values=payload.slippage_values,
+        min_risk_reward_values=payload.min_risk_reward_values,
+        min_price_attractiveness_values=payload.min_price_attractiveness_values,
+    )
+
+
+@router.post("/parameter-sweep", response_model=ParameterSweepResponse)
+def run_parameter_sweep(payload: ParameterSweepRequest, db: Session = Depends(get_db)):
+    """Run a deterministic parameter sweep across existing stored decision signals."""
+    signals = _load_backtest_signals(
+        db=db,
+        tickers=payload.tickers,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    return ValidationEngine.run_parameter_sweep(
+        signals=signals,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        initial_capital=payload.initial_capital,
+        sizing_modes=payload.sizing_modes,
+        slippage_values=payload.slippage_values,
+        min_risk_reward_values=payload.min_risk_reward_values,
+        min_price_attractiveness_values=payload.min_price_attractiveness_values,
+        min_trades=payload.min_trades,
+    )
+
+
+@router.post("/validation-summary", response_model=ValidationSummaryResponse)
+def get_validation_summary(payload: ValidationSummaryRequest, db: Session = Depends(get_db)):
+    """Return an aggregated validation console summary without changing stored decisions."""
+    signals = _load_backtest_signals(
+        db=db,
+        tickers=payload.tickers,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    return ValidationEngine.build_validation_summary(
+        signals=signals,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        initial_capital=payload.initial_capital,
+        train_window_days=payload.train_window_days,
+        test_window_days=payload.test_window_days,
+        step_days=payload.step_days,
+        min_trades_per_window=payload.min_trades_per_window,
+        sizing_modes=payload.sizing_modes,
+        slippage_values=payload.slippage_values,
+        min_risk_reward_values=payload.min_risk_reward_values,
+        min_price_attractiveness_values=payload.min_price_attractiveness_values,
     )
 
 
@@ -119,7 +211,8 @@ def get_performance_summary(db: Session = Depends(get_db)):
     win_rate = len(winning) / total_trades if total_trades > 0 else 0.0
     
     avg_return = sum([d.realized_return for d in decisions]) / total_trades
-    avg_alpha = sum([d.realized_alpha for d in decisions if d.realized_alpha is not None]) / total_trades
+    alpha_values = [d.realized_alpha for d in decisions if d.realized_alpha is not None]
+    avg_alpha = sum(alpha_values) / len(alpha_values) if alpha_values else 0.0
     
     tickers = list(set([d.ticker for d in decisions]))
     
